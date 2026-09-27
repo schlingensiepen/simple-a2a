@@ -214,3 +214,40 @@ def test_the_exit_status_says_which_of_the_three_outcomes_it_was(tmp_path: Path)
     assert check.main(["--patterns", str(clean), "--root", str(root), "--quiet"]) == 0
     assert check.main(["--patterns", str(typo), "--root", str(root), "--quiet"]) == 2
     assert check.main(["--patterns", str(good), "--root", str(tmp_path / "nope")]) == 2
+
+
+def test_prove_insists_that_every_pattern_finds_something(tmp_path: Path) -> None:
+    """The whole-chain counter-test, and it is the more important of the two.
+
+    The sample in each line proves one pattern in isolation. This proves reading
+    the list, walking the tree, matching and reporting — and it fails when a
+    pattern finds nothing, because a list that hits with two of its twenty
+    patterns has proved two.
+    """
+    fixture = tmp_path / "fixture"
+    write(fixture / "hit.md", "internal.example\n")
+    both = write(
+        tmp_path / "both.tsv",
+        "internal\\.example\tinternal.example\nnowhere-at-all\tnowhere-at-all\n",
+    )
+    only_hitting = write(tmp_path / "one.tsv", "internal\\.example\tinternal.example\n")
+
+    assert check.main(["--patterns", str(only_hitting), "--root", str(fixture), "--prove"]) == 0
+    assert check.main(["--patterns", str(both), "--root", str(fixture), "--prove"]) == 1
+
+
+def test_prove_names_the_pattern_that_found_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = tmp_path / "fixture"
+    write(fixture / "hit.md", "internal.example\n")
+    patterns = write(
+        tmp_path / "list.tsv",
+        "internal\\.example\tinternal.example\nmissing-one\tmissing-one\n",
+    )
+
+    check.main(["--patterns", str(patterns), "--root", str(fixture), "--prove"])
+
+    reported = capsys.readouterr().err
+    assert "missing-one" in reported
+    assert "internal" not in reported.split("1 of 2")[0]

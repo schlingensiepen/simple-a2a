@@ -43,8 +43,18 @@ Usage:
 
     python tools/check_forbidden_patterns.py --patterns LIST --root DIR
 
+There is a second mode, `--prove`, and it is the more important one. Point it at
+a fixture written on purpose to be found, and it insists that **every** pattern
+matches something there — naming the ones that did not. The per-pattern sample in
+the list proves each pattern in isolation; this proves the whole chain: reading
+the list, walking the tree, matching, reporting. A check that has never hit
+anything has proved nothing, and one that hits with two of its twenty patterns
+has proved two.
+
 Exit status: 0 when nothing matched and every pattern proved itself, 1 when
-something matched, 2 when the list or the arguments were unusable.
+something matched, 2 when the list or the arguments were unusable. Under
+`--prove` the sense is reversed: 0 when every pattern matched something, 1 when
+any pattern matched nothing.
 """
 
 from __future__ import annotations
@@ -250,6 +260,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="match case exactly; patterns are case-insensitive by default",
     )
     parser.add_argument("--quiet", action="store_true", help="print matches only, no summary line")
+    parser.add_argument(
+        "--prove",
+        action="store_true",
+        help="invert: every pattern must match something in the tree, and the ones that "
+        "match nothing are named. For a fixture written on purpose to be found.",
+    )
     return parser
 
 
@@ -280,6 +296,24 @@ def main(argv: list[str] | None = None) -> int:
 
     skips = frozenset(DEFAULT_SKIP) | set(args.skip)
     hits, skipped = scan(args.root, patterns, skips)
+
+    if args.prove:
+        matched = {hit.pattern.source for hit in hits}
+        missing = [p for p in patterns if p.source not in matched]
+        for pattern in missing:
+            print(
+                f"error: {args.patterns}:{pattern.line_number}: {pattern.source!r} matched "
+                "nothing in the fixture, so nothing proves it works end to end",
+                file=sys.stderr,
+            )
+        if not args.quiet:
+            print(
+                f"{len(patterns) - len(missing)} of {len(patterns)} patterns matched the "
+                f"fixture; {len(skipped)} files skipped",
+                file=sys.stderr,
+            )
+        return 1 if missing else 0
+
     for hit in hits:
         where = "in the name" if hit.in_path else str(hit.line_number)
         print(f"{hit.path}:{where}: {hit.pattern.source} :: {hit.line.strip()}")
