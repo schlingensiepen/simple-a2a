@@ -1,0 +1,9 @@
+# Allowlist: only what the wheel build needs enters the build context.
+# Keeps a local data/ or a stray secret out of image layers structurally,
+# rather than by remembering to exclude each one.
+*
+!src
+!pyproject.toml
+!README.md
+!LICENSE
+!uv.lock

@@ -1,0 +1,25 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { python-version: "3.13" }
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check src tests tools
+      - run: uv run ruff format --check src tests tools
+      - run: uv run pytest
+      # Assertions vanish under -O. A suite that only ever runs without it
+      # cannot tell an assert that carries a guarantee from one that records a
+      # developer's assumption — and the first kind is a bug.
+      - run: uv run python -O -m pytest
+      # The boundaries between the seven blocks are the architecture, and an
+      # import is the cheapest way to break one. The check runs inside the
+      # suite above; it gets its own named step so that when it is what broke,
+      # the log says so.
+      - name: "the seven blocks keep to what they know"
+        run: uv run pytest -q tests/test_architecture.py

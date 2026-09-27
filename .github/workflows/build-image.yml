@@ -1,0 +1,40 @@
+# Building the image.
+#
+# It builds and stops there. Delivery is by pull, so nobody stands at the far
+# end and every check has to sit before publication or inside the artefact —
+# which means publishing may only ever happen after a smoke test has started
+# the image that is about to be published. There is no service yet, so there is
+# no smoke test yet, and therefore no publish step: a workflow that could push
+# an unproven image is worse than one that cannot push at all.
+#
+# What arrives together, in the change that makes the entry point serve: the
+# smoke test, the push, and the branch and tag triggers. The smoke test has to
+# cover a bare start with no variable set at all; all thirty token-free
+# addresses answering, on an empty holding exactly as on a full one, with a
+# token rejected there as no token; no placeholder left in the skill package;
+# the administration secret in the log exactly once, accepted, and an unissued
+# one refused; the token cycle across all three surfaces including revoking
+# twice; the three empty stages — no realm, a realm without a team, a team
+# without a member; the secret still valid after a restart and not logged
+# again; and the build stamp naming the commit it was built from.
+#
+# Until then this workflow answers one question, and it is worth asking on its
+# own: does the image build at all, from this tree, with this Containerfile.
+name: Build image
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - name: The image builds
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile
+          load: true
+          tags: simple-a2a:local
+          build-args: |
+            A2A_BUILD=${{ github.sha }}

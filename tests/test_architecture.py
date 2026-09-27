@@ -1,0 +1,139 @@
+"""The seven blocks keep to what they know.
+
+Each block was given one responsibility and, next to it, a list of what it
+knows nothing of. That second list is the load-bearing half: the names could
+be anything, but the boundaries are what keep an operation from being written
+twice and a surface from growing its own copy of the holdings.
+
+The checks read the imports rather than trusting them, because an import is
+both the cheapest way to break a boundary and the cheapest way to notice.
+They parse whatever is there, so they are as true of an empty block as of a
+full one, and they grow with the code instead of being remembered later.
+
+What is *not* checked here: that the observation surface only ever reads. That
+one is a property of its routes, not of its imports, and it is checked where
+the routes are declared.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import pytest
+
+SRC = Path(__file__).resolve().parents[1] / "src" / "simple_a2a"
+
+BLOCKS = ("core", "store", "domain", "describe", "messaging", "admin", "observe")
+
+SURFACES = ("messaging", "admin", "observe")
+
+#: Names that mean "this module knows what HTTP is".
+HTTP_NAMES = ("fastapi", "starlette", "uvicorn", "httpx")
+
+#: For each block, the blocks of this service it may not reach. The lists are
+#: the "knows nothing of" column, written as module names.
+#:
+#: `core` is at the bottom and reaches nothing. `store` and `domain` are
+#: layered above it, each blind to everything over its head. `describe` sits
+#: beside them: it renders errors, the gate and the guide, and it is used by
+#: the surfaces rather than the other way round — an entry page that reads the
+#: holdings would answer differently on an empty instance, which is precisely
+#: what it must not do. And no surface reaches another: none of them names the
+#: operations of another, so none of them has a reason to import one.
+FORBIDDEN_BLOCKS: dict[str, tuple[str, ...]] = {
+    "core": ("store", "domain", "describe", "messaging", "admin", "observe"),
+    "store": ("domain", "describe", "messaging", "admin", "observe"),
+    "domain": ("describe", "messaging", "admin", "observe"),
+    "describe": ("store", "domain", "messaging", "admin", "observe"),
+    "messaging": ("admin", "observe"),
+    "admin": ("messaging", "observe"),
+    "observe": ("messaging", "admin"),
+}
+
+#: The blocks that hold no HTTP at all. The three surfaces are the only place
+#: where a request exists; below them a request is an argument list.
+NO_HTTP = ("core", "store", "domain")
+
+
+def modules_of(block: str) -> list[Path]:
+    found = sorted((SRC / block).rglob("*.py"))
+    assert found, f"the {block!r} block has no modules; this test would pass on nothing"
+    return found
+
+
+def imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.add(node.module)
+    return names
+
+
+def test_all_seven_blocks_are_there() -> None:
+    """Seven directories, seven blocks, and each one importable.
+
+    A block that quietly vanished would make every other check here pass on
+    less than it was written for.
+    """
+    for block in BLOCKS:
+        assert (SRC / block / "__init__.py").is_file(), f"the {block!r} block is missing"
+    extra = {
+        p.name
+        for p in SRC.iterdir()
+        if p.is_dir() and not p.name.startswith(("_", ".")) and p.name not in BLOCKS
+    }
+    assert not extra, f"a directory beside the seven blocks: {sorted(extra)}"
+
+
+@pytest.mark.parametrize("block", NO_HTTP)
+def test_the_lower_blocks_know_nothing_of_http(block: str) -> None:
+    """Below the surfaces there is no request, only arguments.
+
+    A block down here that can read a request or render a response has taken
+    on one caller's shape, and the next caller gets that shape with it.
+    """
+    for module in modules_of(block):
+        for imported in imported_modules(module):
+            assert not any(imported.split(".")[0] == name for name in HTTP_NAMES), (
+                f"{block}/{module.name} imports {imported}; this block knows nothing of HTTP"
+            )
+
+
+@pytest.mark.parametrize("block", BLOCKS)
+def test_a_block_reaches_no_block_it_knows_nothing_of(block: str) -> None:
+    """The column, read as an import rule.
+
+    An import in the wrong direction does not announce itself: everything
+    still works, and the layering is gone. This is the announcement.
+    """
+    forbidden = tuple(f"simple_a2a.{other}" for other in FORBIDDEN_BLOCKS[block])
+    for module in modules_of(block):
+        for imported in imported_modules(module):
+            assert not any(
+                imported == name or imported.startswith(f"{name}.") for name in forbidden
+            ), (
+                f"{block}/{module.name} imports {imported}; this block knows nothing of "
+                f"{imported.split('.')[1]}"
+            )
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_a_surface_knows_the_holdings_only_from_the_outside(surface: str) -> None:
+    """Nothing of the internals of the holdings — read literally.
+
+    A surface may hand something to the holdings block; it may not know how
+    that block lays out a directory. The difference is visible in the import:
+    `simple_a2a.store` is the block, `simple_a2a.store.anything` is its
+    inside, and once a surface knows the inside, a change of layout is a
+    change to the surfaces.
+    """
+    for module in modules_of(surface):
+        for imported in imported_modules(module):
+            assert not imported.startswith("simple_a2a.store."), (
+                f"{surface}/{module.name} imports {imported}; a surface knows the holdings "
+                "only as a whole, never their internals"
+            )
