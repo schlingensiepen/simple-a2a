@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a tree of files for text that must not be in it.
+r"""Check a tree of files for text that must not be in it.
 
 Every project has strings that are fine in a private note and wrong in a
 published repository: an internal host name, a customer's name, a path from
@@ -25,14 +25,26 @@ supposed to match, the tool tries it before it scans anything, and a pattern
 that cannot match its own sample is an error — not a warning. A check that has
 never hit anything has proved nothing.
 
+**A pattern is matched against the whole file, not line by line**, so one that
+allows whitespace in the middle survives a line wrap. That matters more than it
+sounds: prose gets rewrapped, and a host name broken across two lines is exactly
+the copy that slips through. Write such a pattern with `\s*` where the wrap can
+land — the sample in the second field is what proves you did.
+
+**A path is checked as well as a file's contents.** A name can carry the thing
+you are hunting for just as well as a line can.
+
+**Nothing is skipped quietly.** A file that cannot be read as text — binary, or
+an encoding this does not handle — is named in the report, not just counted, and
+so is a symbolic link, which is listed rather than followed: following one leads
+out of the tree you asked about, and into loops.
+
 Usage:
 
     python tools/check_forbidden_patterns.py --patterns LIST --root DIR
 
 Exit status: 0 when nothing matched and every pattern proved itself, 1 when
-something matched, 2 when the list or the arguments were unusable. Binary
-files are skipped; so are `.git`, `.venv`, caches and anything else named with
-`--skip`.
+something matched, 2 when the list or the arguments were unusable.
 """
 
 from __future__ import annotations
@@ -66,12 +78,22 @@ class Pattern:
 
 @dataclass(frozen=True)
 class Hit:
-    """One match: which pattern, which file, which line."""
+    """One match: which pattern, where, and what it sat in."""
 
     pattern: Pattern
     path: Path
     line_number: int
     line: str
+    #: True when the match was in the path rather than in the contents.
+    in_path: bool = False
+
+
+@dataclass(frozen=True)
+class Skipped:
+    """A file that was not searched, and why. Named, never merely counted."""
+
+    path: Path
+    reason: str
 
 
 def load_patterns(path: Path, *, ignore_case: bool = True) -> list[Pattern]:
@@ -107,41 +129,104 @@ def unproven(patterns: list[Pattern]) -> list[Pattern]:
     return [p for p in patterns if not p.regex.search(p.sample)]
 
 
-def is_text(path: Path) -> bool:
+#: Byte-order marks that say which encoding a file is in. UTF-16 is the reason
+#: this list exists: such a file is full of NUL bytes, so a plain "is there a
+#: NUL" test calls it binary and skips it — with the forbidden text sitting in
+#: it, in plain sight of anyone who opens it in an editor.
+BOMS: tuple[tuple[bytes, str], ...] = (
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+    (b"\xff\xfe\x00\x00", "utf-32"),
+    (b"\x00\x00\xfe\xff", "utf-32"),
+    (b"\xff\xfe", "utf-16"),
+    (b"\xfe\xff", "utf-16"),
+)
+
+
+def read_as_text(path: Path) -> str | None:
+    """The file's text, or `None` when it is not text at all.
+
+    The byte-order mark is consulted first, because the usual "a NUL byte means
+    binary" test gets UTF-16 exactly wrong. After that a NUL really does mean
+    binary, and decoding is forgiving: a file that is mostly UTF-8 with a few
+    bad bytes is still worth searching, and the bad bytes cannot hide anything
+    the patterns are looking for.
+    """
     try:
-        head = path.open("rb").read(SNIFF_BYTES)
+        raw = path.read_bytes()
     except OSError:
-        return False
-    return b"\x00" not in head
+        return None
+    for mark, encoding in BOMS:
+        if raw.startswith(mark):
+            try:
+                return raw.decode(encoding, errors="replace")
+            except (LookupError, UnicodeError):
+                return None
+    if b"\x00" in raw[:SNIFF_BYTES]:
+        return None
+    return raw.decode("utf-8", errors="replace")
 
 
-def files_under(root: Path, skip: frozenset[str]) -> list[Path]:
-    found: list[Path] = []
+def entries_under(root: Path, skip: frozenset[str]) -> tuple[list[Path], list[Skipped]]:
+    """Every file under the root, and the links that were listed instead.
+
+    A symbolic link is not followed — that leads out of the tree and into loops
+    — but it is reported. A link that vanishes from the report altogether is
+    indistinguishable from an empty directory, which is the one thing a check
+    like this must never look like.
+    """
+    files: list[Path] = []
+    skipped: list[Skipped] = []
     for path in sorted(root.rglob("*")):
         if any(part in skip for part in path.parts):
             continue
-        if path.is_file() and not path.is_symlink():
-            found.append(path)
-    return found
+        if path.is_symlink():
+            skipped.append(Skipped(path=path, reason="symbolic link, not followed"))
+            continue
+        if path.is_file():
+            files.append(path)
+    return files, skipped
 
 
-def scan(root: Path, patterns: list[Pattern], skip: frozenset[str]) -> tuple[list[Hit], list[Path]]:
-    """Walk the tree. Returns the matches and the files that were skipped."""
+def _line_of(text: str, offset: int) -> tuple[int, str]:
+    """Which line an offset falls on, and that line's text."""
+    number = text.count("\n", 0, offset) + 1
+    start = text.rfind("\n", 0, offset) + 1
+    end = text.find("\n", offset)
+    return number, text[start : end if end != -1 else len(text)]
+
+
+def scan(
+    root: Path, patterns: list[Pattern], skip: frozenset[str]
+) -> tuple[list[Hit], list[Skipped]]:
+    """Walk the tree. Returns the matches and the files that were not searched."""
     hits: list[Hit] = []
-    skipped: list[Path] = []
-    for path in files_under(root, skip):
-        if not is_text(path):
-            skipped.append(path)
+    files, skipped = entries_under(root, skip)
+    for path in files:
+        relative = path.relative_to(root).as_posix()
+        for pattern in patterns:
+            if pattern.regex.search(relative):
+                # The name carries it. Reported as line 0, because there is no
+                # line: the finding is the path itself.
+                hits.append(
+                    Hit(
+                        pattern=pattern,
+                        path=path,
+                        line_number=0,
+                        line=relative,
+                        in_path=True,
+                    )
+                )
+        text = read_as_text(path)
+        if text is None:
+            skipped.append(Skipped(path=path, reason="not readable as text"))
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            skipped.append(path)
-            continue
-        for number, line in enumerate(text.splitlines(), start=1):
-            for pattern in patterns:
-                if pattern.regex.search(line):
-                    hits.append(Hit(pattern=pattern, path=path, line_number=number, line=line))
+        for pattern in patterns:
+            # Searched over the whole file rather than line by line, so that a
+            # pattern written to tolerate whitespace still finds what a line wrap
+            # split in half.
+            for match in pattern.regex.finditer(text):
+                number, line = _line_of(text, match.start())
+                hits.append(Hit(pattern=pattern, path=path, line_number=number, line=line))
     return hits, skipped
 
 
@@ -193,13 +278,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    hits, skipped = scan(args.root, patterns, frozenset(DEFAULT_SKIP) | set(args.skip))
+    skips = frozenset(DEFAULT_SKIP) | set(args.skip)
+    hits, skipped = scan(args.root, patterns, skips)
     for hit in hits:
-        print(f"{hit.path}:{hit.line_number}: {hit.pattern.source} :: {hit.line.strip()}")
+        where = "in the name" if hit.in_path else str(hit.line_number)
+        print(f"{hit.path}:{where}: {hit.pattern.source} :: {hit.line.strip()}")
     if not args.quiet:
-        checked = len(files_under(args.root, frozenset(DEFAULT_SKIP) | set(args.skip)))
+        # Every skipped file by name, not just a count. A number tells nobody
+        # which file went unsearched, and that is the one place something can
+        # sit unseen after a green run.
+        for entry in skipped:
+            print(f"skipped {entry.path}: {entry.reason}", file=sys.stderr)
+        searched = len(entries_under(args.root, skips)[0]) - sum(
+            1 for entry in skipped if entry.reason == "not readable as text"
+        )
         print(
-            f"{len(patterns)} patterns, all proved; {checked - len(skipped)} text files checked, "
+            f"{len(patterns)} patterns, all proved; {searched} files searched, "
             f"{len(skipped)} skipped; {len(hits)} matches",
             file=sys.stderr,
         )

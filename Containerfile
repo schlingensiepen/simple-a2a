@@ -25,11 +25,14 @@ ENV A2A_BUILD=${A2A_BUILD}
 USER simplea2a
 EXPOSE 8251 8252 8253
 
-# The image's own claim about itself. It asks the participant surface, which
-# is the one an operator publishes; `healthy` means the process answers, and
-# deliberately nothing more.
+# The image's own claim about itself. It asks every surface that is configured
+# to be on, reading the configuration rather than a fixed port: wired to 8251, a
+# check would call the container unhealthy forever if the operator switched the
+# participant surface off — a perfectly correct configuration — and the platform
+# would restart a working service in a loop. `healthy` means the process
+# answers, and deliberately nothing more.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8251/health', timeout=3).status==200 else 1)"
+  CMD ["python", "-m", "simple_a2a.probe"]
 
 # Inside the container the boundary is the container, so bind all interfaces:
 # no port is published unless the operator publishes it. Set as environment

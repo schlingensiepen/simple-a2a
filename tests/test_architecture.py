@@ -31,16 +31,25 @@ SURFACES = ("messaging", "admin", "observe")
 #: Names that mean "this module knows what HTTP is".
 HTTP_NAMES = ("fastapi", "starlette", "uvicorn", "httpx")
 
-#: For each block, the blocks of this service it may not reach. The lists are
-#: the "knows nothing of" column, written as module names.
+#: For each block, the blocks of this service it may not reach.
 #:
-#: `core` is at the bottom and reaches nothing. `store` and `domain` are
-#: layered above it, each blind to everything over its head. `describe` sits
-#: beside them: it renders errors, the gate and the guide, and it is used by
-#: the surfaces rather than the other way round — an entry page that reads the
-#: holdings would answer differently on an empty instance, which is precisely
-#: what it must not do. And no surface reaches another: none of them names the
-#: operations of another, so none of them has a reason to import one.
+#: Two things are written into these lists, and it is worth saying which is
+#: which. The **column** "knows nothing of" gives: no HTTP below the surfaces,
+#: no surface reaching into the holdings' internals, `describe` blind to the
+#: holdings. The **layering** — core and store at the bottom, domain above,
+#: describe beside, three surfaces on top — gives the rest: that `store` does
+#: not reach `domain`, that `domain` does not reach `describe`, that no surface
+#: names another. Both are stated in the same place, so both are checked here;
+#: the lists are therefore slightly stricter than the column read on its own,
+#: and that is deliberate rather than an oversight.
+#:
+#: The reasons, briefly. `core` is at the bottom and reaches nothing. `store`
+#: and `domain` are layered above it, each blind to everything over its head.
+#: `describe` sits beside them: it renders errors, the gate and the guide, and
+#: it is used by the surfaces rather than the other way round — an entry page
+#: that read the holdings would answer differently on an empty instance, which
+#: is precisely what it must not do. And no surface reaches another: none of
+#: them names the operations of another, so none has a reason to import one.
 FORBIDDEN_BLOCKS: dict[str, tuple[str, ...]] = {
     "core": ("store", "domain", "describe", "messaging", "admin", "observe"),
     "store": ("domain", "describe", "messaging", "admin", "observe"),
@@ -87,6 +96,18 @@ def test_all_seven_blocks_are_there() -> None:
         if p.is_dir() and not p.name.startswith(("_", ".")) and p.name not in BLOCKS
     }
     assert not extra, f"a directory beside the seven blocks: {sorted(extra)}"
+
+
+def test_the_only_modules_outside_the_blocks_are_the_two_entry_points() -> None:
+    """Two modules live beside the blocks, and both are entry points.
+
+    `__main__` is the service, `probe` is the image asking itself whether it is
+    healthy. Both may know what HTTP is, because that is their whole job — which
+    is exactly why a third module appearing here should have to be noticed.
+    """
+    modules = {p.stem for p in SRC.glob("*.py")}
+
+    assert modules == {"__init__", "__main__", "probe"}
 
 
 @pytest.mark.parametrize("block", NO_HTTP)

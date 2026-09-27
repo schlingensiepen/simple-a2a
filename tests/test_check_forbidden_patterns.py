@@ -120,8 +120,8 @@ def test_matching_ignores_case_unless_told_otherwise(tmp_path: Path) -> None:
     assert not check.scan(root, strict, frozenset(check.DEFAULT_SKIP))[0]
 
 
-def test_a_binary_file_is_skipped_and_reported_as_skipped(tmp_path: Path) -> None:
-    """Skipping quietly would be a hiding place; the count says how many."""
+def test_a_binary_file_is_skipped_and_named_in_the_report(tmp_path: Path) -> None:
+    """Skipping quietly would be a hiding place; the report names the file."""
     patterns = write(tmp_path / "list.tsv", "secret\tsecret\n")
     root = tmp_path / "tree"
     root.mkdir()
@@ -130,7 +130,65 @@ def test_a_binary_file_is_skipped_and_reported_as_skipped(tmp_path: Path) -> Non
     hits, skipped = check.scan(root, check.load_patterns(patterns), frozenset(check.DEFAULT_SKIP))
 
     assert hits == []
-    assert [p.name for p in skipped] == ["blob.bin"]
+    assert [entry.path.name for entry in skipped] == ["blob.bin"]
+    assert "not readable as text" in skipped[0].reason
+
+
+def test_a_pattern_split_by_a_line_wrap_is_found(tmp_path: Path) -> None:
+    """Prose gets rewrapped, and the wrapped copy is the one that slips through.
+
+    The pattern has to allow the whitespace — that part is the list's business —
+    but the search has to be over the whole file, or allowing it changes nothing.
+    """
+    patterns = write(tmp_path / "list.tsv", "internal\\s*\\.\\s*example\tinternal.example\n")
+    root = tmp_path / "tree"
+    write(root / "page.md", "The host is internal\n.example and nothing else.\n")
+
+    hits, _ = check.scan(root, check.load_patterns(patterns), frozenset(check.DEFAULT_SKIP))
+
+    assert len(hits) == 1
+    assert hits[0].line_number == 1, "reported where the match starts"
+
+
+def test_a_name_that_carries_it_is_found_too(tmp_path: Path) -> None:
+    """A file name hides a string as well as a line does."""
+    patterns = write(tmp_path / "list.tsv", "internal\\.example\tinternal.example\n")
+    root = tmp_path / "tree"
+    write(root / "notes-from-internal.example-meeting.md", "nothing in here\n")
+
+    hits, _ = check.scan(root, check.load_patterns(patterns), frozenset(check.DEFAULT_SKIP))
+
+    assert len(hits) == 1
+    assert hits[0].in_path
+    assert hits[0].line_number == 0
+
+
+def test_a_symbolic_link_is_listed_rather_than_followed(tmp_path: Path) -> None:
+    """Unreported it would be indistinguishable from an empty directory."""
+    patterns = write(tmp_path / "list.tsv", "secret\tsecret\n")
+    outside = write(tmp_path / "outside.txt", "secret\n")
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "link.txt").symlink_to(outside)
+
+    hits, skipped = check.scan(root, check.load_patterns(patterns), frozenset(check.DEFAULT_SKIP))
+
+    assert hits == []
+    assert [entry.path.name for entry in skipped] == ["link.txt"]
+    assert "symbolic link" in skipped[0].reason
+
+
+def test_utf_16_is_searched_rather_than_mistaken_for_binary(tmp_path: Path) -> None:
+    """Full of NUL bytes, and readable to anyone who opens it in an editor."""
+    patterns = write(tmp_path / "list.tsv", "internal\\.example\tinternal.example\n")
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "notes.txt").write_bytes("host: internal.example\n".encode("utf-16"))
+
+    hits, skipped = check.scan(root, check.load_patterns(patterns), frozenset(check.DEFAULT_SKIP))
+
+    assert len(hits) == 1
+    assert skipped == []
 
 
 def test_the_default_skips_keep_version_control_out(tmp_path: Path) -> None:
