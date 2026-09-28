@@ -362,15 +362,30 @@ def redeem(context: Context, voucher: object, *, self_image: object = None) -> N
     # Everything the caller sent is checked, and everything the invitation needs is
     # read, *before* the voucher is used up. Otherwise a mistyped field costs
     # somebody their invitation.
-    self_image_text = (
-        _check_text(
-            self_image if isinstance(self_image, str) else "",
-            "member_self_image",
-            limits.MEMBER_SELF_IMAGE_MAX_CHARS,
+    # A central service **has** to say what it can do, and a team member must not
+    # try to here. Both halves were wrong before: the text told a service the field
+    # belonged to its registration and the code let it through without one, so a
+    # service could enter the registry with nothing to say for itself — which is the
+    # exact thing the specification's argument rules out ("it is the only text it
+    # has"). A member sets theirs afterwards, with a raw body and no escaping.
+    if invitation.kind == SERVICE:
+        if not isinstance(self_image, str) or not self_image.strip():
+            raise refusals.InvalidInput(
+                "member_self_image",
+                reason="a central service says what it can do when it registers; it is the "
+                "only text it has, and without it nobody can tell what it is for",
+            )
+        self_image_text = _check_text(
+            self_image, "member_self_image", limits.MEMBER_SELF_IMAGE_MAX_CHARS
         )
-        if invitation.kind == SERVICE
-        else ""
-    )
+    else:
+        if self_image is not None:
+            raise refusals.InvalidInput(
+                "member_self_image",
+                reason="only a central service gives one here; set yours afterwards with "
+                "PUT /me/self, which takes the text as a raw body",
+            )
+        self_image_text = ""
     mission = _mission_of(context, realm_id, pointer.subject_id, located.state) or ""
     team = (
         context.holdings.team(realm_id, invitation.team_id or "")

@@ -409,9 +409,11 @@ def build() -> Register:
     register.teach(
         "POST /invitations/redeem",
         Type.INVALID_INPUT,
-        "`invitation` is the voucher you were given, 43 characters. If you are becoming a "
-        "central service, `member_self_image` comes with it and inline only: you have no "
-        "token yet, so you cannot deposit a file first.",
+        "`invitation` is the voucher you were given, 43 characters. A **central service** "
+        "sends `member_self_image` with it and inline only — it is the only text it has, so "
+        "without it nobody can tell what it is for, and it cannot point at a stored file "
+        "because it has no token yet. A **team member** does not send that field at all: you "
+        "set yours afterwards with PUT /me/self, which takes the text as a raw body.",
     )
 
     _op(

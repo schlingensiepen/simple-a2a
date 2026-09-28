@@ -301,3 +301,48 @@ def _realm_id(context: Context, name: str) -> str:
     found = context.holdings.realm_named(name)
     assert found is not None
     return found.id
+
+
+def test_a_central_service_has_to_say_what_it_can_do_when_it_registers(
+    context: Context, world: World
+) -> None:
+    """It is the only text it has, so without it nobody can tell what it is for.
+
+    Found by an agent that was handed nothing but an address and an invitation: the
+    delivered text told it the field belonged to its registration, and the code let it
+    through without one. The text was right.
+    """
+    voucher = access.obtain_service_invitation(
+        context, world.anna.caller, service_name="Wetter", display_name="Zettel Wetter"
+    )
+
+    for nothing in (None, "", "   "):
+        with pytest.raises(refusals.InvalidInput) as raised:
+            access.redeem(context, voucher, self_image=nothing)
+        assert raised.value.field == "member_self_image"
+        assert "only text" in raised.value.reason
+
+    # And the voucher is not spent by a refusal, so it still works once it is right.
+    assert access.redeem(context, voucher, self_image="I answer about weather.").name == "Wetter"
+
+
+def test_a_team_member_does_not_give_one_here(context: Context, world: World) -> None:
+    """They set theirs afterwards, with a raw body and no escaping to get wrong."""
+    voucher = access.obtain_member_invitation(
+        context,
+        realm_id=world.realm_id,
+        team_id=world.team_id,
+        member_name="Doris",
+        mission="Sie deckt.",
+        display_name="Zettel Doris",
+        issued_by_kind="operator",
+        issued_by_name="operator",
+        grants_realm_master=True,
+    )
+
+    with pytest.raises(refusals.InvalidInput) as raised:
+        access.redeem(context, voucher, self_image="I am Doris.")
+
+    assert raised.value.field == "member_self_image"
+    assert "PUT /me/self" in raised.value.reason
+    assert access.redeem(context, voucher).name == "Doris"
