@@ -538,8 +538,12 @@ def unknown_address(i: Instance) -> Case:
 #: are not here, and cannot be: `falsches-verb` — every tool calls its operation
 #: with the verb the description gives it, so no tool can send another — and
 #: `innerer-fehler`, which needs the service itself to break, and no call from
-#: outside can arrange that. `unbekannte-adresse` *is* here: a file name with a
-#: slash in it reaches the router as two path segments and matches no address.
+#: outside can arrange that. `unbekannte-adresse` *is* here, and **the answer is
+#: wrong**: a file name with a slash in it should be refused as invalid input, but
+#: the router decodes `%2F` before the application is asked and finds no address.
+#: The case is kept because what it proves — the refusal comes through unchanged —
+#: holds either way; the day the service answers correctly, it goes red on purpose
+#: and moves to `ungültige-eingabe`. It is a tripwire, not an endorsement.
 REFUSALS = {
     "kein-token": no_token,
     "token-entzogen": token_revoked,
