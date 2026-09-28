@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import sys
@@ -557,6 +558,7 @@ def call(service: Service, operation: Operation, arguments: dict[str, Any]) -> d
         path += "?" + urllib.parse.urlencode(query)
 
     body: bytes | None = None
+    file_type: str | None = None
     if operation.body_kind == "json":
         payload = {
             name: value
@@ -572,6 +574,10 @@ def call(service: Service, operation: Operation, arguments: dict[str, Any]) -> d
             return _text_result(f"{operation.name} needs `path`: the file to deposit.", error=True)
         try:
             body = Path(str(local)).expanduser().read_bytes()
+            # The service keeps whatever type it is told and hands it back on every
+            # fetch, and takes text/plain when told nothing. A file from disk is
+            # labelled by its extension, or as plain bytes when that says nothing.
+            file_type = mimetypes.guess_type(str(local))[0] or "application/octet-stream"
         except OSError as exc:
             return _text_result(
                 f"Could not read {local} on this machine: {exc.strerror or exc}. Nothing was sent.",
@@ -583,7 +589,13 @@ def call(service: Service, operation: Operation, arguments: dict[str, Any]) -> d
             operation.method,
             path,
             body=body,
-            content_type=operation.body_content_type if body is not None else None,
+            content_type=(
+                file_type
+                if operation.body_kind == "file"
+                else operation.body_content_type
+                if body is not None
+                else None
+            ),
             headers=headers,
             with_token=operation.takes_token,
         )

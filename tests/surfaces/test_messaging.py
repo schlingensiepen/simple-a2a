@@ -444,14 +444,52 @@ def test_a_file_is_deposited_and_fetched_under_a_name_of_the_fetcher_s_choice(
     a_team(admin)
     token = joined(admin, participants, "Anna")
 
-    deposited = participants.post("/files", content=b"one,two\n3,4\n", headers=bearer(token)).json()
+    deposited = participants.post(
+        "/files",
+        content=b"one,two\n3,4\n",
+        headers={**bearer(token), "Content-Type": "text/csv"},
+    ).json()
     assert deposited["size"] == 12
+    assert deposited["media_type"] == "text/csv"
 
-    fetched = participants.get(f"/files/{deposited['file_id']}/numbers.csv", headers=bearer(token))
+    fetched = participants.get(f"/files/{deposited['file_id']}/numbers.txt", headers=bearer(token))
 
     assert fetched.content == b"one,two\n3,4\n"
+    # The type the depositor said, not one guessed from the name the fetcher chose.
     assert fetched.headers["content-type"].startswith("text/csv")
-    assert "numbers.csv" in fetched.headers["content-disposition"]
+    assert "numbers.txt" in fetched.headers["content-disposition"]
+
+
+def test_a_file_deposited_without_a_type_is_plain_text_and_says_so(
+    admin: TestClient, participants: TestClient
+) -> None:
+    a_team(admin)
+    token = joined(admin, participants, "Anna")
+
+    deposited = participants.post(
+        "/files", content=b"%PDF and nothing else", headers=bearer(token)
+    ).json()
+    fetched = participants.get(f"/files/{deposited['file_id']}/brief.pdf", headers=bearer(token))
+
+    # Not guessed from the name the fetcher chose: nobody said it was a PDF.
+    assert deposited["media_type"] == "text/plain"
+    assert fetched.headers["content-type"].startswith("text/plain")
+
+
+def test_a_media_type_that_could_not_be_handed_back_is_refused(
+    admin: TestClient, participants: TestClient
+) -> None:
+    a_team(admin)
+    token = joined(admin, participants, "Anna")
+
+    answer = participants.post(
+        "/files",
+        content=b"x",
+        headers={**bearer(token), "Content-Type": "text/" + "x" * 300},
+    )
+
+    assert answer.status_code == 400
+    assert answer.json()["type"] == "invalid-input"
 
 
 def test_a_path_in_the_saved_name_is_dropped_rather_than_followed(

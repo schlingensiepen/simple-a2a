@@ -74,12 +74,11 @@ names as they stood there.
 `GET /files/{file_id}/{file_name}` gives the content. The id and the
 name both stand in the address, so that a browser can derive the name
 to save it under without being told; you get the smoothed name in a
-`Content-Disposition` header and a media type derived from the
-extension of the name you passed, falling back to
-`application/octet-stream`. The service stores no media type for a
-file — the name in your address decides — which is what makes it
-possible to look at a file in a browser and to save it under a
-sensible name.
+`Content-Disposition` header and the media type the file was
+deposited with — what its depositor sent as `Content-Type`, or
+`text/plain` if nothing was sent. That is what makes it possible to
+look at a file in a browser, and the name lets you save it under a
+sensible one.
 
 The name is yours to choose, and an attachment entry tells you the
 one the sender intended. A name carries no control characters and no

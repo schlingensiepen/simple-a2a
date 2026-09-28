@@ -444,10 +444,10 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     ) -> Response:
         with guard("GET /files/{file_id}/{file_name}"):
             safe = messages.safe_file_name(file_name)
-            content = messages.fetch_file(context, caller, file_id)
+            content, said = messages.fetch_file(context, caller, file_id)
             return Response(
                 content,
-                media_type=http.media_type(safe),
+                media_type=said or http.media_type(safe),
                 headers={"Content-Disposition": f'attachment; filename="{safe}"'},
             )
 

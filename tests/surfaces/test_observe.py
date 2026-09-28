@@ -317,7 +317,9 @@ def test_from_an_entry_to_the_envelope_the_body_and_the_file(
     anna = member(admin, participants, "Anna")
     member(admin, participants, "Berta")
     deposited = participants.post(
-        "/files", content=b"one,two\n", headers=bearer(anna["token"])
+        "/files",
+        content=b"one,two\n",
+        headers={**bearer(anna["token"]), "Content-Type": "text/csv"},
     ).json()
     participants.post(
         "/peers/messages",

@@ -24,6 +24,10 @@ RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
 # not one of them.
 ARG A2A_BUILD="unknown"
 ENV A2A_BUILD=${A2A_BUILD}
+# When this image was built, ISO 8601 in UTC, passed in by whoever builds it. Left
+# empty, /build says null rather than the moment the container happened to start.
+ARG A2A_BUILD_AT=""
+ENV A2A_BUILD_AT=${A2A_BUILD_AT}
 
 USER simplea2a
 EXPOSE 8251 8252 8253

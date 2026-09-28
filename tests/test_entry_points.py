@@ -68,6 +68,15 @@ def test_the_build_stamp_is_in_its_own_namespace(monkeypatch: pytest.MonkeyPatch
     assert not __main__.BUILD_VARIABLE.startswith(config.PREFIX)
 
 
+def test_a_build_that_did_not_say_when_says_null(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Not the start time: a restart is not a build, and the field says "built"."""
+    monkeypatch.delenv(f"{__main__.BUILD_VARIABLE}_AT", raising=False)
+    assert __main__.build_stamp()["built_at"] is None
+
+    monkeypatch.setenv(f"{__main__.BUILD_VARIABLE}_AT", "2026-09-28T12:00:00Z")
+    assert __main__.build_stamp()["built_at"] == "2026-09-28T12:00:00Z"
+
+
 def test_an_unknown_build_says_so_rather_than_inventing_one() -> None:
     stamp = __main__.build_stamp()
 

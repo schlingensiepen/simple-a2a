@@ -640,8 +640,12 @@ class Holdings:
 
     # ------------------------------------------------------------------ files
 
-    def put_file(self, realm_id: str, file_id: str, content: bytes) -> StoredFile:
-        record = StoredFile(id=file_id, created_at=now_iso(), size=len(content))
+    def put_file(
+        self, realm_id: str, file_id: str, content: bytes, *, media_type: str | None = None
+    ) -> StoredFile:
+        record = StoredFile(
+            id=file_id, created_at=now_iso(), size=len(content), media_type=media_type
+        )
         self._put(self.layout.file(realm_id, file_id), record, {CONTENT: content})
         return record
 

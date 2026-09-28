@@ -662,17 +662,42 @@ def body_of(context: Context, caller: Caller, message_id: str) -> str:
 # -------------------------------------------------------------------- the files
 
 
-def deposit_file(context: Context, caller: Peer | Service, content: bytes) -> tuple[str, int]:
-    """Keep a file. It belongs to the depositor's realm and to no message yet."""
+#: What a file is when its depositor did not say: text, like everything else this
+#: service hands out unless asked otherwise.
+UNSPECIFIED_MEDIA_TYPE = "text/plain"
+
+#: A media type as it may travel in a header: printable ASCII, and not endless.
+_MEDIA_TYPE = re.compile(r"[\x21-\x7e][\x20-\x7e]{0,254}")
+
+
+def deposit_file(
+    context: Context, caller: Peer | Service, content: bytes, media_type: object = None
+) -> tuple[str, int, str]:
+    """Keep a file, and what its depositor said it is.
+
+    The media type is remembered as sent and handed back on every fetch — not
+    checked against the bytes and not guessed from a name, because the depositor
+    is the one who knows. Absent, the file is plain text. It is only refused where
+    it could not be sent back at all: it goes out again in a header.
+    """
     if len(content) > context.config.file_max_bytes:
         raise refusals.TooLarge(
             "file", limit=context.config.file_max_bytes, actual=len(content), unit="bytes"
         )
-    stored = context.holdings.put_file(caller.realm_id, new_id(), content)
-    return stored.id, stored.size
+    said = media_type.strip() if isinstance(media_type, str) else ""
+    if not said:
+        said = UNSPECIFIED_MEDIA_TYPE
+    elif not _MEDIA_TYPE.fullmatch(said):
+        raise refusals.InvalidInput(
+            "Content-Type",
+            reason="a media type such as application/pdf, in printable ASCII and at most "
+            "255 characters; it is handed back in a header on every fetch",
+        )
+    stored = context.holdings.put_file(caller.realm_id, new_id(), content, media_type=said)
+    return stored.id, stored.size, said
 
 
-def fetch_file(context: Context, caller: Caller, file_id: str) -> bytes:
+def fetch_file(context: Context, caller: Caller, file_id: str) -> tuple[bytes, str | None]:
     """Whoever has the identifier may fetch it. Only the realm is checked.
 
     The identifier is the permission, and it is not checked whether the fetcher
@@ -688,7 +713,8 @@ def fetch_file(context: Context, caller: Caller, file_id: str) -> bytes:
     content = context.holdings.file_content(realm_id, file_id)
     if content is None:
         raise refusals.UnknownIdentifier("file")
-    return content
+    stored = context.holdings.file(realm_id, file_id)
+    return content, stored.media_type if stored is not None else None
 
 
 # -------------------------------------------------------------- the observation

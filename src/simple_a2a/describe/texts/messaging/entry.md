@@ -62,6 +62,7 @@ them into a context and work from it without the others.
 - %%BASE%%/health — whether the process answers. It says nothing
   about the holdings and nothing about content.
 - %%BASE%%/build — version, build id and build time, so that a
-  report can be tied to one build.
+  report can be tied to one build. The build time is `null` where
+  the build did not record one, rather than a guess.
 
 Everything on this page answers without a token.

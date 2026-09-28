@@ -44,7 +44,7 @@ logger = logging.getLogger("simple_a2a")
 BUILD_VARIABLE = "A2A_BUILD"
 
 
-def build_stamp() -> dict[str, str]:
+def build_stamp() -> dict[str, str | None]:
     """What `GET /build` answers.
 
     The version does not move between two commits, so on its own it cannot answer the
@@ -52,12 +52,12 @@ def build_stamp() -> dict[str, str]:
     """
     import os
 
-    from simple_a2a.core.clock import now_iso
-
     return {
         "version": __version__,
         "build_id": os.environ.get(BUILD_VARIABLE, "unknown"),
-        "built_at": os.environ.get(f"{BUILD_VARIABLE}_AT", now_iso()),
+        # When the image was built, as the build said — and nothing when it did not.
+        # Filling in the start time made every restart claim a new build.
+        "built_at": os.environ.get(f"{BUILD_VARIABLE}_AT") or None,
     }
 
 

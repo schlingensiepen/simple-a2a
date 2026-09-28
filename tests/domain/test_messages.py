@@ -359,7 +359,7 @@ def _fresh_peer(context: Context, world: World) -> str:
 def test_an_attachment_is_a_file_or_a_reference_and_never_both(
     context: Context, world: World
 ) -> None:
-    file_id, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
     other = send(context, world.anna.caller).message_id
 
     with pytest.raises(refusals.InvalidInput) as neither:
@@ -377,7 +377,7 @@ def test_an_attachment_is_a_file_or_a_reference_and_never_both(
 def test_a_size_that_was_sent_in_is_invalid_input(context: Context, world: World) -> None:
     """Output only: for a file the service knows the bytes, for a reference the
     total of the referenced message, and a caller can know neither reliably."""
-    file_id, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
 
     with pytest.raises(refusals.InvalidInput) as raised:
         send(
@@ -392,7 +392,7 @@ def test_a_size_that_was_sent_in_is_invalid_input(context: Context, world: World
 def test_a_reference_counts_nothing_towards_the_total(context: Context, world: World) -> None:
     """Otherwise the calculation would be recursive: a referenced message can
     carry references of its own."""
-    file_id, size = messages.deposit_file(context, world.anna.caller, b"x" * 100)
+    file_id, size, _ = messages.deposit_file(context, world.anna.caller, b"x" * 100)
     referenced = send(context, world.anna.caller, body="lang" * 50).message_id
 
     sent = send(
@@ -417,8 +417,8 @@ def test_a_reference_counts_nothing_towards_the_total(context: Context, world: W
 def test_the_names_of_one_list_are_unique(context: Context, world: World) -> None:
     """Otherwise a reference from the body is ambiguous, and for files the name
     decides the fetch path."""
-    first, _ = messages.deposit_file(context, world.anna.caller, b"eins")
-    second, _ = messages.deposit_file(context, world.anna.caller, b"zwei")
+    first, _, _ = messages.deposit_file(context, world.anna.caller, b"eins")
+    second, _, _ = messages.deposit_file(context, world.anna.caller, b"zwei")
 
     with pytest.raises(refusals.InvalidInput) as raised:
         send(
@@ -438,7 +438,7 @@ def test_an_attachment_name_that_is_no_name_is_refused(
 
     So is anything of which no name is left once the path is dropped.
     """
-    file_id, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
 
     with pytest.raises(refusals.InvalidInput) as raised:
         send(context, world.anna.caller, attachments=[{"name": name, "file_id": file_id}])
@@ -466,7 +466,7 @@ def test_a_directory_part_is_dropped_rather_than_resolved(
     gets a usable attachment instead of a rejection, and nothing that looks like a
     path reaches a response header or a fetch address.
     """
-    file_id, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
 
     sent = send(context, world.anna.caller, attachments=[{"name": given, "file_id": file_id}])
 
@@ -475,7 +475,7 @@ def test_a_directory_part_is_dropped_rather_than_resolved(
 
 
 def test_more_than_sixty_four_entries_are_too_large(context: Context, world: World) -> None:
-    file_id, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
 
     with pytest.raises(refusals.TooLarge) as raised:
         send(
@@ -497,7 +497,7 @@ def test_an_attachment_in_another_realm_is_an_unknown_identifier(
     access.create_team(context, other_id, "kalt", "")
     other_team = context.holdings.team_named(other_id, "kalt").id
     stranger = invite(other_id, other_team, "Fremd")
-    elsewhere, _ = messages.deposit_file(context, stranger.caller, b"woanders")
+    elsewhere, _, _ = messages.deposit_file(context, stranger.caller, b"woanders")
 
     with pytest.raises(refusals.UnknownIdentifier):
         send(context, world.anna.caller, attachments=[{"name": "a", "file_id": elsewhere}])
@@ -510,7 +510,7 @@ def test_an_attachment_in_another_realm_is_an_unknown_identifier(
 
 
 def test_a_body_is_a_text_or_a_reference_and_exactly_one(context: Context, world: World) -> None:
-    file_id, _ = messages.deposit_file(context, world.anna.caller, b"Aus der Datei.")
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, b"Aus der Datei.")
 
     with pytest.raises(refusals.InvalidInput):
         messages.send_to_peers(context, world.anna.caller, recipients=[], subject="s")
@@ -528,12 +528,12 @@ def test_a_body_is_a_text_or_a_reference_and_exactly_one(context: Context, world
 def test_a_referenced_body_is_taken_over_and_the_file_stays(context: Context, world: World) -> None:
     """The message is complete afterwards; the file is not used up and keeps its
     identifier."""
-    file_id, _ = messages.deposit_file(context, world.anna.caller, b"Text.")
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, b"Text.")
     sent = messages.send_to_peers(
         context, world.anna.caller, recipients=[], subject="s", body_file_id=file_id
     )
 
-    assert messages.fetch_file(context, world.anna.caller, file_id) == b"Text."
+    assert messages.fetch_file(context, world.anna.caller, file_id)[0] == b"Text."
     assert messages.body_of(context, world.berta.caller, sent.message_id) == "Text."
 
 
@@ -543,7 +543,7 @@ def test_a_referenced_body_is_measured_against_the_body_limit(
     """The limit belongs to the parameter, not to the file: the text has become a
     body."""
     too_much = b"x" * (context.config.body_max_bytes + 1)
-    file_id, _ = messages.deposit_file(context, world.anna.caller, too_much)
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, too_much)
 
     with pytest.raises(refusals.TooLarge) as raised:
         messages.send_to_peers(
@@ -556,7 +556,7 @@ def test_a_referenced_body_is_measured_against_the_body_limit(
 def test_a_referenced_body_that_is_not_utf_8_is_invalid_input(
     context: Context, world: World
 ) -> None:
-    file_id, _ = messages.deposit_file(context, world.anna.caller, b"\xff\xfe nicht utf-8")
+    file_id, _, _ = messages.deposit_file(context, world.anna.caller, b"\xff\xfe nicht utf-8")
 
     with pytest.raises(refusals.InvalidInput) as raised:
         messages.send_to_peers(

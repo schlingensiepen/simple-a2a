@@ -291,6 +291,13 @@ class FileDeposited(BaseModel):
         examples=["the-identifier-is-43-characters-of-base64url"],
     )
     size: int = Field(description="Its size in bytes.", examples=[4096])
+    media_type: str = Field(
+        description="What the file was remembered as: the Content-Type you sent, or "
+        "text/plain if you sent none. Every fetch hands it back. A tool that "
+        "sends a form type by default (curl does) makes that the file's type — send the "
+        "right one.",
+        examples=["application/pdf"],
+    )
 
 
 class InviteePeer(Input):

@@ -264,7 +264,7 @@ def guide_of(request: Request, surface: str) -> Guide:
 
 
 def cascade(
-    surface: str, *, description: str, build: dict[str, str], offers_mcp: bool = False
+    surface: str, *, description: str, build: dict[str, str | None], offers_mcp: bool = False
 ) -> APIRouter:
     """The seven token-free routes, built once from a parameter.
 
@@ -315,7 +315,7 @@ def cascade(
         return {"healthy": True, "checked_at": now_iso()}
 
     @router.get("/build", summary="Which build this is, so a finding can be tied to one.")
-    async def build_stamp() -> dict[str, str]:
+    async def build_stamp() -> dict[str, str | None]:
         return dict(build)
 
     @router.get(
@@ -325,7 +325,7 @@ def cascade(
     async def skill(request: Request) -> Response:
         made = guide_of(request, surface)
         archive = package.build_archive(
-            made, description=description, build=build.get("build_id", "unknown")
+            made, description=description, build=build.get("build_id") or "unknown"
         )
         return Response(
             archive,
@@ -383,6 +383,24 @@ MEDIA_TYPES = {
     ".svg": "image/svg+xml",
     ".zip": "application/zip",
 }
+
+
+def raw_body(media_type: str, schema: dict[str, Any], description: str) -> dict[str, Any]:
+    """A request body the framework cannot see, described by hand.
+
+    Some operations read their body raw rather than through a model — the text of
+    a self-image or a setup note, the bytes of a file — because a JSON wrapper around either is
+    exactly the escaping the raw body exists to avoid. The framework infers a body
+    only from a model, so without this the description would say these operations
+    take nothing, and a caller building from it would send nothing.
+    """
+    return {
+        "requestBody": {
+            "required": True,
+            "description": description,
+            "content": {media_type: {"schema": schema}},
+        }
+    }
 
 
 def media_type(name: str) -> str:

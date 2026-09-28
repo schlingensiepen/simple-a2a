@@ -80,6 +80,17 @@ def _window(offset: int | None, limit: int | None) -> access.Window:
     return access.Window.of(offset, limit)
 
 
+#: The body of both setup notes: the text itself, raw.
+_NOTE_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "examples": ["Participants: https://a2a.example/ — the team kitchen is for the cooks."],
+}
+_NOTE_BODY = (
+    "The note itself, raw, in UTF-8 — not JSON, so there is nothing to escape. It "
+    "replaces what was there; read it first if you mean to add to it."
+)
+
+
 def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     """The administration application. One of three in one process."""
     register = texts.build()
@@ -419,6 +430,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         "/setup-note",
         summary="Replace the installation-wide note. There is no appending.",
         response_model=models.NoteLength,
+        openapi_extra=http.raw_body("text/plain", _NOTE_SCHEMA, _NOTE_BODY),
     )
     async def write_note(request: Request, caller: Operator = caller_of) -> Any:
         with guard("PUT /setup-note"):
@@ -440,6 +452,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         "/realms/{realm}/setup-note",
         summary="Replace the note of one realm. There is no appending.",
         response_model=models.NoteLength,
+        openapi_extra=http.raw_body("text/plain", _NOTE_SCHEMA, _NOTE_BODY),
     )
     async def write_realm_note(
         realm: RealmName, request: Request, caller: Operator = caller_of

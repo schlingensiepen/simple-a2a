@@ -184,6 +184,9 @@ class StoredFile(Record):
     id: str
     created_at: str
     size: int
+    #: What the depositor said it is, handed back unchanged on every fetch. Absent
+    #: only in holdings written before it was kept.
+    media_type: str | None = None
 
 
 @dataclass(frozen=True)

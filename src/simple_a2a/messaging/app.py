@@ -86,24 +86,6 @@ AliasName = Annotated[
 _SELF_IMAGE_EXAMPLE = "I keep the shopping list and know what is in the fridge."
 
 
-def _raw_body(media_type: str, schema: dict[str, Any], description: str) -> dict[str, Any]:
-    """A request body the framework cannot see, described by hand.
-
-    Two operations read their body raw rather than through a model — the text of
-    a self-image, the bytes of a file — because a JSON wrapper around either is
-    exactly the escaping the raw body exists to avoid. The framework infers a body
-    only from a model, so without this the description would say these operations
-    take nothing, and a caller building from it would send nothing.
-    """
-    return {
-        "requestBody": {
-            "required": True,
-            "description": description,
-            "content": {media_type: {"schema": schema}},
-        }
-    }
-
-
 def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     register = texts.build()
     app = FastAPI(
@@ -253,7 +235,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         "/me/self",
         summary="Replace what you say about yourself. The body is the text itself.",
         response_model=models.TextLength,
-        openapi_extra=_raw_body(
+        openapi_extra=http.raw_body(
             "text/plain",
             {"type": "string", "examples": [_SELF_IMAGE_EXAMPLE]},
             "The text itself, raw, in UTF-8 — not JSON, so there is nothing to escape. "
@@ -525,10 +507,12 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         "/files",
         summary="Deposit a file. The body is its bytes; the name goes on the envelope.",
         response_model=models.FileDeposited,
-        openapi_extra=_raw_body(
+        openapi_extra=http.raw_body(
             "application/octet-stream",
             {"type": "string", "format": "binary", "examples": ["<the bytes of the file>"]},
-            "The content of the file, raw — not a multipart form. At most "
+            "The content of the file, raw — not a multipart form. Send its media type as "
+            "Content-Type: it is remembered and handed back on every fetch; without one the "
+            "file is text/plain. At most "
             f"{context.config.file_max_bytes} bytes on this installation. Agree on "
             "co-location first: on the same machine, a path in a message body beats an "
             "upload.",
@@ -537,8 +521,10 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     async def deposit(request: Request, caller: Caller = anyone_of) -> Any:
         with guard("POST /files"):
             assert isinstance(caller, Peer | Service)
-            file_id, size = messages.deposit_file(context, caller, await request.body())
-            return {"file_id": file_id, "size": size}
+            file_id, size, said = messages.deposit_file(
+                context, caller, await request.body(), request.headers.get("content-type")
+            )
+            return {"file_id": file_id, "size": size, "media_type": said}
 
     @app.get(
         "/files/{file_id}/{file_name}",
@@ -546,9 +532,8 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         response_class=Response,
         responses={
             200: {
-                "description": "The bytes, exactly as deposited. The media type is derived "
-                "from the extension of the name in the address, and is "
-                "application/octet-stream for anything unrecognised.",
+                "description": "The bytes, exactly as deposited, with the media type its "
+                "depositor sent as Content-Type — text/plain if none was sent.",
                 "content": {
                     "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
                 },
@@ -560,10 +545,10 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     ) -> Response:
         with guard("GET /files/{file_id}/{file_name}"):
             safe = messages.safe_file_name(file_name)
-            content = messages.fetch_file(context, caller, file_id)
+            content, said = messages.fetch_file(context, caller, file_id)
             return Response(
                 content,
-                media_type=http.media_type(safe),
+                media_type=said or http.media_type(safe),
                 headers={"Content-Disposition": f'attachment; filename="{safe}"'},
             )
 

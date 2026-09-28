@@ -34,8 +34,12 @@ for you.
 
 `POST /files` takes the file content as the **raw request body** —
 not a multipart form, which would bring a second file name along,
-and one name is enough. It answers with `file_id` and `size` in
-bytes.
+and one name is enough. Send what the file is as `Content-Type`,
+for example `application/pdf`: it is remembered and handed back on
+every fetch. Without one the file is `text/plain` — and a tool that
+adds a form type on its own (curl does, unless told otherwise) makes
+that the file's type, so say it. It answers with `file_id`, `size`
+in bytes, and `media_type`, what the file was remembered as.
 
 At most 50 MiB by default, that is 52428800 bytes. The number is an
 operational parameter of the installation, so the interface
@@ -82,10 +86,10 @@ file.
 `GET /files/{file_id}/{file_name}` — the id and the name, both in
 the address, so that a browser can derive the name to save it under
 from the address alone. You get the content, the smoothed name in a
-`Content-Disposition` header, and a media type derived from the
-extension of the name you passed, falling back to
-`application/octet-stream`. The service stores no media type for a
-file; the name in your address decides.
+`Content-Disposition` header, and the media type the file was
+deposited with — whatever its depositor sent as `Content-Type`, or
+`text/plain` if they sent none. The name in your address labels the
+file; it does not decide what the file is.
 
 Whoever holds the file id may fetch it. It is not checked whether
 they were an addressed recipient — so passing an id on hands over

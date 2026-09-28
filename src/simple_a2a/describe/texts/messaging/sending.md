@@ -28,7 +28,8 @@ than a test.
 
 - `recipients` — a list of names from your team. An **empty list
   means everyone else in the team**; you are never a recipient of
-  your own message.
+  your own message. The list has no limit of its own: your team is
+  its limit.
 - `subject` — plain text, at most 256 characters.
 - `body` **or** `body_file_id` — exactly one of the two.
 - `attachments` — optional, see below.
