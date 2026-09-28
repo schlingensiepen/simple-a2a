@@ -154,11 +154,22 @@ class Invitation(Record):
     """
 
     kind: str
+    #: How the operator refers to the voucher: unique per kind per realm, and the
+    #: only handle there is — listing and revoking go by it, never by the secret.
     display_name: str
+    #: Who the identity will be once it is redeemed. A different thing from the
+    #: display name, and fixed here because whoever invites has to give them a
+    #: mission — you cannot write an assignment for a person you cannot name.
+    invited_name: str
     created_at: str
     issued_by_kind: str
     issued_by_name: str
     team_id: str | None = None
+    #: Whether redeeming this one makes its holder a realm master. True for every
+    #: invitation the operator obtained — that is their way of putting somebody
+    #: into a team, and it is the way back into a team where nobody can act any
+    #: more, so it comes without a parameter and without a choice.
+    grants_realm_master: bool = False
     consumed_at: str | None = None
     revoked_at: str | None = None
 
@@ -229,6 +240,12 @@ class MailboxEntry(Record):
     `sender` is the sender *in this recipient's world*. For a central service
     that is an alias where a name would otherwise be, so that the service can
     reply without ever learning who wrote.
+
+    `delivered_at` is written into the entry's *name*, which is what the ordering
+    of a mailbox is made of, and it is read back from there. It is a field here so
+    that the name can be built from one place — not so that it can be stored
+    twice: two copies of one fact eventually disagree, and then a listing hands
+    back an entry dated later than the one above it.
     """
 
     message_id: str

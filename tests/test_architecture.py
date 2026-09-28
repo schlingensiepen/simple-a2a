@@ -45,16 +45,23 @@ HTTP_NAMES = ("fastapi", "starlette", "uvicorn", "httpx")
 #:
 #: The reasons, briefly. `core` is at the bottom and reaches nothing. `store`
 #: and `domain` are layered above it, each blind to everything over its head.
-#: `describe` sits beside them: it renders errors, the gate and the guide, and
-#: it is used by the surfaces rather than the other way round — an entry page
-#: that read the holdings would answer differently on an empty instance, which
-#: is precisely what it must not do. And no surface reaches another: none of
-#: them names the operations of another, so none has a reason to import one.
+#: `describe` sits beside them and above `domain`: it renders what an operation
+#: refused, so it has to know the refusals — but it stays blind to the holdings,
+#: because an entry page that read them would answer differently on an empty
+#: instance, which is precisely what it must not do. And no surface reaches
+#: another: none of them names the operations of another, so none has a reason to
+#: import one.
+#:
+#: `describe` was first written as blind to `domain` as well, and that was one
+#: tightening too many: a refusal is stated in the words of teams and names, and
+#: turning it into a rejection type with a text is this block's whole job. Doing
+#: it in each of the three surfaces instead would be the same translation written
+#: three times, which is the drift a single gate exists to prevent.
 FORBIDDEN_BLOCKS: dict[str, tuple[str, ...]] = {
     "core": ("store", "domain", "describe", "messaging", "admin", "observe"),
     "store": ("domain", "describe", "messaging", "admin", "observe"),
     "domain": ("describe", "messaging", "admin", "observe"),
-    "describe": ("store", "domain", "messaging", "admin", "observe"),
+    "describe": ("store", "messaging", "admin", "observe"),
     "messaging": ("admin", "observe"),
     "admin": ("messaging", "observe"),
     "observe": ("messaging", "admin"),

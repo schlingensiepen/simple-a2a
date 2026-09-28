@@ -66,6 +66,7 @@ def test_a_display_name_is_unique_per_kind_not_per_realm(holdings: Holdings, rea
         voucher=new_id(),
         kind="member",
         display_name="Zettel",
+        invited_name="Berta",
         issued_by_kind="admin",
         issued_by_name="operator",
         team_id=team.id,
@@ -76,6 +77,7 @@ def test_a_display_name_is_unique_per_kind_not_per_realm(holdings: Holdings, rea
         voucher=new_id(),
         kind="service",
         display_name="Zettel",
+        invited_name="Berta",
         issued_by_kind="peer",
         issued_by_name="Otto",
     )
@@ -170,6 +172,7 @@ def test_an_invitation_is_found_by_its_voucher_and_the_voucher_is_nowhere(
         voucher=voucher,
         kind="member",
         display_name="Zettel",
+        invited_name="Berta",
         issued_by_kind="admin",
         issued_by_name="operator",
         team_id=team.id,
@@ -194,6 +197,7 @@ def test_an_invitation_is_used_up_once(holdings: Holdings, realm, team) -> None:
         voucher=voucher,
         kind="member",
         display_name="Zettel",
+        invited_name="Berta",
         issued_by_kind="admin",
         issued_by_name="operator",
         team_id=team.id,
@@ -213,6 +217,7 @@ def test_an_invitation_is_revoked_over_its_display_name_never_its_voucher(
         voucher=voucher,
         kind="member",
         display_name="Zettel",
+        invited_name="Berta",
         issued_by_kind="admin",
         issued_by_name="operator",
         team_id=team.id,
@@ -356,3 +361,60 @@ def test_a_half_written_object_is_invisible_to_every_listing(holdings: Holdings,
 
     assert holdings.team_ids(realm.id) == []
     assert holdings.team_named(realm.id, "whatever") is None
+
+
+def test_the_reported_delivery_time_is_the_one_the_ordering_uses(
+    holdings: Holdings, realm, team
+) -> None:
+    """One fact, one copy — otherwise a listing can contradict its own order.
+
+    The timestamp lives in the entry's name, because the name is what the ordering
+    is made of. Stored in the record as well it would be a second copy, and a
+    listing could then hand back an entry dated later than the one above it. Here
+    the record is written with one value and the name with another, and the name is
+    the one that comes back.
+    """
+    member = holdings.create_member(
+        realm.id, team.id, new_id(), "Otto", token=new_id(), mission="a"
+    )
+    mailbox = holdings.layout.member_mailbox(realm.id, team.id, member.id) / "inbox"
+    message_id = new_id()
+    holdings.deliver(
+        mailbox,
+        MailboxEntry(
+            message_id=message_id,
+            delivered_at="2026-09-27T12:00:00.000Z",
+            sender={"kind": "peer", "name": "Anna"},
+        ),
+    )
+    # Moved in time the way anything here is moved: by renaming.
+    entry = next(iter(mailbox.iterdir()))
+    entry.rename(mailbox / f"2026-01-01T00:00:00.000Z-{message_id}")
+
+    listed = holdings.mailbox_entries(mailbox)
+
+    assert [e.delivered_at for e in listed] == ["2026-01-01T00:00:00.000Z"]
+
+
+def test_an_identifier_with_a_hyphen_does_not_confuse_the_split(
+    holdings: Holdings, realm, team
+) -> None:
+    """Identifiers contain hyphens, and so do timestamps; the separator is "Z-"."""
+    member = holdings.create_member(
+        realm.id, team.id, new_id(), "Otto", token=new_id(), mission="a"
+    )
+    mailbox = holdings.layout.member_mailbox(realm.id, team.id, member.id) / "inbox"
+    awkward = "a-b-c" + "x" * 38
+    holdings.deliver(
+        mailbox,
+        MailboxEntry(
+            message_id=awkward,
+            delivered_at="2026-09-27T12:00:00.000Z",
+            sender={"kind": "peer", "name": "Anna"},
+        ),
+    )
+
+    listed = holdings.mailbox_entries(mailbox)
+
+    assert listed[0].delivered_at == "2026-09-27T12:00:00.000Z"
+    assert listed[0].message_id == awkward

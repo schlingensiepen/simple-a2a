@@ -28,7 +28,7 @@ import dataclasses
 import json
 import os
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from simple_a2a.core import atomic
@@ -398,27 +398,39 @@ class Holdings:
         voucher: str,
         kind: str,
         display_name: str,
+        invited_name: str,
         issued_by_kind: str,
         issued_by_name: str,
         team_id: str | None = None,
         mission: str = "",
+        grants_realm_master: bool = False,
     ) -> Invitation:
         """Store an invitation. The voucher itself is never written down.
 
         Its hash names the directory, which is how a presented one is found, and
         which is why there is nothing here to hand back out.
+
+        It also goes into the same index as the tokens, because redeeming is the
+        one operation without a standing token: whoever presents a voucher cannot
+        say which realm it belongs to, so the index has to say it for them.
         """
         digest = token_hash(voucher)
         self._claim(self.layout.invitation_by_name(realm_id, kind, display_name), digest)
         record = Invitation(
             kind=kind,
             display_name=display_name,
+            invited_name=invited_name,
             created_at=now_iso(),
             issued_by_kind=issued_by_kind,
             issued_by_name=issued_by_name,
             team_id=team_id,
+            grants_realm_master=grants_realm_master,
         )
         self._put(self.layout.invitation(realm_id, digest, State.OPEN), record, {MISSION: mission})
+        self.register_token(
+            voucher,
+            TokenPointer(kind="invitation", realm_id=realm_id, subject_id=digest, team_id=team_id),
+        )
         return record
 
     def invitation_for(self, realm_id: str, voucher: str) -> Located[Invitation] | None:
@@ -533,6 +545,21 @@ class Holdings:
         """
         return f"{entry.delivered_at}-{entry.message_id}"
 
+    @staticmethod
+    def _delivered_at_of(name: str) -> str | None:
+        """The timestamp out of the entry's name, which is the authoritative one.
+
+        The name is what the ordering is made of, so it is also what the reported
+        time has to be. Written into the record as well it would be a second copy
+        of one fact, and a listing could then hand back an entry dated later than
+        the one above it.
+        """
+        # Split on the first "Z-": a timestamp has hyphens of its own, and so can an
+        # identifier, but the timestamp's single "Z" is its last character — so the
+        # first "Z-" in the name is the separator and nothing else can be.
+        stamp, separator, _ = name.partition("Z-")
+        return f"{stamp}Z" if separator else None
+
     def deliver(self, mailbox: Path, entry: MailboxEntry) -> None:
         self._put(mailbox / self._entry_name(entry), entry, as_file=ENVELOPE)
 
@@ -543,8 +570,10 @@ class Holdings:
         found = []
         for name in names:
             entry = self._get(mailbox / name, MailboxEntry, as_file=ENVELOPE)
-            if entry is not None:
-                found.append(entry)
+            if entry is None:
+                continue
+            stamp = self._delivered_at_of(name)
+            found.append(entry if stamp is None else replace(entry, delivered_at=stamp))
         return found
 
     # ---------------------------------------------------------------- aliases

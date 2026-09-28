@@ -1,0 +1,657 @@
+"""Sending, delivering, and what a reader is shown.
+
+Three things here are worth reading before the code, because each one is a
+decision that shows up in the shape rather than in a rule:
+
+**An empty recipient list is shorthand for the sender, resolved at send time.**
+What goes into the envelope is the list of the other members of the team *at that
+moment*. So a broadcast stays traceable after the next person joins — which is
+what the observation surface needs, and "everybody else at time t" is otherwise
+lost.
+
+**An alias is minted at every delivery to a central service** and stands in the
+sender's place. The service replies to the alias and never learns a name. That is
+why "answer, do not start" is not a rule: a service that has received nothing has
+no alias, so it has nobody to write to.
+
+**Whoever fetches a message gets the envelope of their own delivery**, if they
+have one, and otherwise the message's own. Those are two different readers, not
+two answers: a recipient reads what was settled when it was delivered, and
+whoever uses a passed-on identifier sees the original sender. A service always has
+a delivery of its own — it only learns an identifier from its own mailbox — so it
+always sees the alias.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from simple_a2a.core import limits
+from simple_a2a.core.clock import now_iso
+from simple_a2a.core.ids import is_id, new_id
+from simple_a2a.core.names import check_name, comparison_key
+from simple_a2a.domain import refusals
+from simple_a2a.domain.callers import Caller, Observer, Peer, Service
+from simple_a2a.domain.context import Context
+from simple_a2a.store.records import Alias, MailboxEntry, Message, Participant
+
+INBOX = "inbox"
+OUTBOX = "outbox"
+
+
+@dataclass(frozen=True)
+class Sent:
+    """What sending answers with. The recipients are the resolved ones."""
+
+    message_id: str
+    sent_at: str
+    recipients: list[Participant]
+    warnings: list[str]
+
+
+# ----------------------------------------------------------------- the mailboxes
+
+
+def mailbox_of(context: Context, caller: Peer | Service, view: str) -> Path:
+    if isinstance(caller, Peer):
+        return (
+            context.holdings.layout.member_mailbox(
+                caller.realm_id, caller.team_id, caller.member_id
+            )
+            / view
+        )
+    return context.holdings.layout.service_mailbox(caller.realm_id, caller.service_id) / view
+
+
+def list_mailbox(
+    context: Context, caller: Peer | Service, view: str, *, offset: int, limit: int
+) -> list[MailboxEntry]:
+    """A window over a growing list, newest first, envelopes only.
+
+    A window over a growing list shifts when something arrives between two
+    fetches. Bearable because the identifiers are stable: an agent recognises a
+    repeat and stops as soon as it sees one it knows — and the self-description
+    says so.
+    """
+    entries = context.holdings.mailbox_entries(mailbox_of(context, caller, view))
+    return entries[offset : offset + limit]
+
+
+# ------------------------------------------------------------------- resolution
+
+
+def resolve_peers(
+    context: Context, sender: Peer, names: object
+) -> tuple[list[Participant], list[str]]:
+    """Turn what a sender asked for into the list that goes in the envelope.
+
+    An empty list means everybody else in the team. Naming oneself explicitly is
+    allowed and has no effect — the sender is left out either way, because one's
+    own messages do not land in one's own inbox. If nobody is left, the message is
+    still accepted and the answer carries a warning: the sender did everything
+    they could.
+
+    Revoked identities count. Delivery to them succeeds, the mailbox keeps
+    collecting, and whoever wants to know about the revocation sees the mark in
+    the team listing. No warning for that: nothing is broken.
+    """
+    if names is None:
+        names = []
+    if not isinstance(names, list) or any(not isinstance(n, str) for n in names):
+        raise refusals.InvalidInput("recipients", reason="a list of names")
+
+    members = list(context.holdings.members(sender.realm_id, sender.team_id))
+    by_key = {comparison_key(found.record.name): found.record for found in members}
+
+    if not names:
+        chosen = [record for key, record in by_key.items() if key != comparison_key(sender.name)]
+    else:
+        chosen = []
+        seen: set[str] = set()
+        for asked in names:
+            key = comparison_key(asked)
+            if key not in by_key:
+                raise refusals.UnknownName(asked, namespace="member")
+            if key == comparison_key(sender.name) or key in seen:
+                continue
+            seen.add(key)
+            chosen.append(by_key[key])
+
+    resolved = sorted(
+        (Participant(kind="peer", name=record.name) for record in chosen), key=lambda p: p.name
+    )
+    warnings = [refusals.NO_RECIPIENT] if not resolved else []
+    return resolved, warnings
+
+
+def resolve_service(context: Context, sender: Peer, name: object) -> Participant:
+    """One name, unique across the realm. Same shape, one word different."""
+    if check_name(name) is not None:
+        raise refusals.InvalidInput("recipient", reason="a service name")
+    assert isinstance(name, str)
+    located = context.holdings.service_named(sender.realm_id, name)
+    if located is None:
+        raise refusals.UnknownName(name, namespace="service")
+    return Participant(kind="service", name=located.record.name)
+
+
+# ------------------------------------------------------------------- attachments
+
+
+def check_attachments(context: Context, realm_id: str, raw: object) -> tuple[list[dict], int]:
+    """Check the list and work out what the file attachments weigh.
+
+    A reference transfers nothing, so it counts zero towards the total. Without
+    that the size calculation would be recursive, because a referenced message can
+    carry references of its own.
+
+    `size` is output and never input: for a file the service knows the bytes, for a
+    reference the total size of the referenced message, and a caller cannot know
+    either reliably. A `size` that was sent in is invalid input.
+    """
+    if raw is None:
+        return [], 0
+    if not isinstance(raw, list):
+        raise refusals.InvalidInput("attachments", reason="a list")
+    if len(raw) > limits.ATTACHMENTS_MAX:
+        raise refusals.TooLarge(
+            "attachments", limit=limits.ATTACHMENTS_MAX, actual=len(raw), unit="entries"
+        )
+
+    entries: list[dict] = []
+    weight = 0
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise refusals.InvalidInput("attachments", reason="each entry is an object")
+        if "size" in entry:
+            raise refusals.InvalidInput("attachments.size", reason="output only, never sent in")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise refusals.InvalidInput("attachments.name", reason="missing")
+        if len(name) > limits.ATTACHMENT_NAME_MAX_CHARS:
+            raise refusals.TooLarge(
+                "attachments.name",
+                limit=limits.ATTACHMENT_NAME_MAX_CHARS,
+                actual=len(name),
+                unit="characters",
+            )
+        # A name is not a path. Control characters, line breaks and directory
+        # parts are refused rather than resolved: a file attachment's name ends up
+        # in a response header and in a fetch path.
+        if any(ch in name for ch in "\r\n\t\0/\\") or name in (".", ".."):
+            raise refusals.InvalidInput(
+                "attachments.name", reason="not a path, no control characters"
+            )
+        key = comparison_key(name)
+        if key in seen:
+            raise refusals.InvalidInput("attachments.name", reason=f"{name!r} appears twice")
+        seen.add(key)
+
+        file_id, message_id = entry.get("file_id"), entry.get("message_id")
+        if (file_id is None) == (message_id is None):
+            raise refusals.InvalidInput(
+                "attachments", reason="exactly one of file_id and message_id"
+            )
+        if file_id is not None:
+            if not is_id(file_id):
+                raise refusals.InvalidInput("attachments.file_id", reason="not an identifier")
+            stored = context.holdings.file(realm_id, file_id)
+            if stored is None:
+                raise refusals.UnknownIdentifier("file")
+            entries.append({"name": name, "file_id": file_id, "size": stored.size})
+            weight += stored.size
+        else:
+            if not is_id(message_id):
+                raise refusals.InvalidInput("attachments.message_id", reason="not an identifier")
+            referenced = context.holdings.message(realm_id, message_id)
+            if referenced is None:
+                raise refusals.UnknownIdentifier("message")
+            entries.append({"name": name, "message_id": message_id, "size": referenced.total_size})
+    return entries, weight
+
+
+# ------------------------------------------------------------------------ bodies
+
+
+def resolve_body(context: Context, realm_id: str, body: object, body_file_id: object) -> str:
+    """Text or reference, and exactly one of the two fields is filled.
+
+    The kind hangs on the field name rather than on a field whose meaning depends
+    on its content. The limit belongs to the *parameter*, not to the file: a
+    referenced file is checked against the body limit, because that is what it has
+    become.
+    """
+    if (body is None) == (body_file_id is None):
+        raise refusals.InvalidInput("body", reason="exactly one of body and body_file_id")
+    if body is not None:
+        if not isinstance(body, str):
+            raise refusals.InvalidInput("body", reason="text")
+        text = body
+    else:
+        if not is_id(body_file_id):
+            raise refusals.InvalidInput("body_file_id", reason="not an identifier")
+        raw = context.holdings.file_content(realm_id, str(body_file_id))
+        if raw is None:
+            raise refusals.UnknownIdentifier("file")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise refusals.InvalidInput("body_file_id", reason="not valid UTF-8") from None
+    size = len(text.encode("utf-8"))
+    if size > context.config.body_max_bytes:
+        raise refusals.TooLarge(
+            "body", limit=context.config.body_max_bytes, actual=size, unit="bytes"
+        )
+    return text
+
+
+def check_subject(subject: object) -> str:
+    """The subject takes no reference: it is short, and there is nowhere to put one."""
+    if not isinstance(subject, str):
+        raise refusals.InvalidInput("subject", reason="text")
+    if len(subject) > limits.SUBJECT_MAX_CHARS:
+        raise refusals.TooLarge(
+            "subject", limit=limits.SUBJECT_MAX_CHARS, actual=len(subject), unit="characters"
+        )
+    return subject
+
+
+def check_reply_to(context: Context, realm_id: str, in_reply_to: object) -> str | None:
+    if in_reply_to is None:
+        return None
+    if not is_id(in_reply_to):
+        raise refusals.InvalidInput("in_reply_to", reason="not an identifier")
+    if context.holdings.message(realm_id, str(in_reply_to)) is None:
+        raise refusals.UnknownIdentifier("message")
+    return str(in_reply_to)
+
+
+# ------------------------------------------------------------------ the sending
+
+
+def _store_and_deliver(
+    context: Context,
+    *,
+    realm_id: str,
+    team_id: str,
+    sender: Participant,
+    recipients: list[Participant],
+    subject: str,
+    body: str,
+    attachments: list[dict],
+    attachment_weight: int,
+    in_reply_to: str | None,
+    warnings: list[str],
+) -> Sent:
+    """Write the message once, then one mailbox entry per delivery.
+
+    The order matters: the message exists before any delivery points at it, so a
+    crash in between leaves an entry nobody can reach rather than a pointer to
+    nothing.
+    """
+    body_size = len(body.encode("utf-8"))
+    message = Message(
+        id=new_id(),
+        created_at=now_iso(),
+        team_id=team_id,
+        sender={"kind": sender.kind, "name": sender.name},
+        recipients=[{"kind": p.kind, "name": p.name} for p in recipients],
+        attachments=attachments,
+        body_size=body_size,
+        total_size=body_size + attachment_weight,
+        in_reply_to=in_reply_to,
+    )
+    context.holdings.put_message(realm_id, message, subject=subject, body=body)
+
+    for recipient in recipients:
+        _deliver_to(context, realm_id, team_id, message, recipient)
+
+    # The sender's own copy. Their own message is not in their inbox — that is what
+    # the outbox is for — and it exists because an agent loses its context between
+    # two instructions and could otherwise not read back what it said itself.
+    _deliver(context, _mailbox_for(context, realm_id, team_id, sender, OUTBOX), message, sender)
+    return Sent(
+        message_id=message.id,
+        sent_at=message.created_at,
+        recipients=recipients,
+        warnings=warnings,
+    )
+
+
+def _mailbox_for(
+    context: Context, realm_id: str, team_id: str, who: Participant, view: str
+) -> Path | None:
+    if who.kind == "peer":
+        located = context.holdings.member_named(realm_id, team_id, who.name)
+        if located is None:
+            return None
+        return context.holdings.layout.member_mailbox(realm_id, team_id, located.record.id) / view
+    if who.kind == "service":
+        found = context.holdings.service_named(realm_id, who.name)
+        if found is None:
+            return None
+        return context.holdings.layout.service_mailbox(realm_id, found.record.id) / view
+    return None
+
+
+def _deliver(context: Context, mailbox: Path | None, message: Message, sender: Participant) -> None:
+    if mailbox is None:
+        return
+    context.holdings.deliver(
+        mailbox,
+        MailboxEntry(
+            message_id=message.id,
+            delivered_at=now_iso(),
+            sender={"kind": sender.kind, "name": sender.name},
+        ),
+    )
+
+
+def _deliver_to(
+    context: Context, realm_id: str, team_id: str, message: Message, recipient: Participant
+) -> None:
+    """Delivery has exactly two cases, and both end with a name in the envelope.
+
+    To a central service: find or mint the alias and put it in. To a team member:
+    read the sender's team, check the names that hold there, and deliver.
+    """
+    sender = Participant(kind=message.sender["kind"], name=message.sender["name"])
+    if recipient.kind == "service":
+        found = context.holdings.service_named(realm_id, recipient.name)
+        if found is None:
+            return
+        shown = Participant(
+            kind="alias",
+            name=_alias_for(context, realm_id, team_id, message, found.record.id, sender),
+        )
+        mailbox = context.holdings.layout.service_mailbox(realm_id, found.record.id) / INBOX
+        _deliver(context, mailbox, message, shown)
+        return
+    _deliver(context, _mailbox_for(context, realm_id, team_id, recipient, INBOX), message, sender)
+
+
+def _alias_for(
+    context: Context,
+    realm_id: str,
+    team_id: str,
+    message: Message,
+    service_id: str,
+    sender: Participant,
+) -> str:
+    """Find the alias of this delivery, or mint it.
+
+    Bound to one message and one service, which is what makes it useless for
+    starting anything. Finding comes first so that the same delivery cannot end up
+    with two.
+    """
+    existing = context.holdings.alias_for_delivery(realm_id, message.id, service_id)
+    if existing is not None:
+        return existing
+    value = new_id()
+    context.holdings.create_alias(
+        realm_id,
+        Alias(
+            value=value,
+            created_at=now_iso(),
+            message_id=message.id,
+            service_id=service_id,
+            team_id=team_id,
+            sender={"kind": sender.kind, "name": sender.name},
+        ),
+    )
+    return value
+
+
+def send_to_peers(
+    context: Context,
+    sender: Peer,
+    *,
+    recipients: object,
+    subject: object,
+    body: object = None,
+    body_file_id: object = None,
+    attachments: object = None,
+    in_reply_to: object = None,
+) -> Sent:
+    resolved, warnings = resolve_peers(context, sender, recipients)
+    text = resolve_body(context, sender.realm_id, body, body_file_id)
+    entries, weight = check_attachments(context, sender.realm_id, attachments)
+    return _store_and_deliver(
+        context,
+        realm_id=sender.realm_id,
+        team_id=sender.team_id,
+        sender=Participant(kind="peer", name=sender.name),
+        recipients=resolved,
+        subject=check_subject(subject),
+        body=text,
+        attachments=entries,
+        attachment_weight=weight,
+        in_reply_to=check_reply_to(context, sender.realm_id, in_reply_to),
+        warnings=warnings,
+    )
+
+
+def send_to_service(
+    context: Context,
+    sender: Peer,
+    *,
+    recipient: object,
+    subject: object,
+    body: object = None,
+    body_file_id: object = None,
+    attachments: object = None,
+    in_reply_to: object = None,
+) -> Sent:
+    target = resolve_service(context, sender, recipient)
+    text = resolve_body(context, sender.realm_id, body, body_file_id)
+    entries, weight = check_attachments(context, sender.realm_id, attachments)
+    return _store_and_deliver(
+        context,
+        realm_id=sender.realm_id,
+        team_id=sender.team_id,
+        sender=Participant(kind="peer", name=sender.name),
+        recipients=[target],
+        subject=check_subject(subject),
+        body=text,
+        attachments=entries,
+        attachment_weight=weight,
+        in_reply_to=check_reply_to(context, sender.realm_id, in_reply_to),
+        warnings=[],
+    )
+
+
+def send_to_alias(
+    context: Context,
+    sender: Service,
+    *,
+    alias: str,
+    subject: object,
+    body: object = None,
+    body_file_id: object = None,
+    attachments: object = None,
+) -> Sent:
+    """The central service's one way of sending, and nobody else's.
+
+    No recipient field: the alias is the recipient. `in_reply_to` is set by the
+    service itself, to the message the alias belongs to — a service answers, it
+    does not start, and that is the shape rather than a rule.
+
+    No check that the caller was the recipient is needed: they have the alias or
+    they do not. A passed-on message identifier is no use for this, there is no
+    alias for one's own sent message, and no alias points at a service.
+    """
+    found = context.holdings.alias(sender.realm_id, alias)
+    if found is None or found.service_id != sender.service_id:
+        raise refusals.UnknownIdentifier("alias")
+    text = resolve_body(context, sender.realm_id, body, body_file_id)
+    entries, weight = check_attachments(context, sender.realm_id, attachments)
+    # The answer goes back as the service's *name*, with the kind `service`: the
+    # team member sees an ordinary message from a name they can address, and learns
+    # nothing of an alias.
+    return _store_and_deliver(
+        context,
+        realm_id=sender.realm_id,
+        team_id=found.team_id,
+        sender=Participant(kind="service", name=sender.name),
+        recipients=[Participant(kind=found.sender["kind"], name=found.sender["name"])],
+        subject=check_subject(subject),
+        body=text,
+        attachments=entries,
+        attachment_weight=weight,
+        in_reply_to=found.message_id,
+        warnings=[],
+    )
+
+
+# ------------------------------------------------------------------ the reading
+
+
+@dataclass(frozen=True)
+class Envelope:
+    """A message as one reader sees it.
+
+    `sender` is the one that holds in this reader's world. Everything else is the
+    message's own: one message, stored once.
+    """
+
+    message_id: str
+    sender: Participant
+    recipients: list[Participant]
+    sent_at: str
+    subject: str
+    body_size: int
+    total_size: int
+    attachments: list[dict]
+    in_reply_to: str | None
+
+
+def envelope(context: Context, caller: Caller, message_id: str) -> Envelope:
+    """The envelope of the caller's own delivery, or the message's own.
+
+    This is the one place the two rules meet, and they are about two readers
+    rather than two answers. A recipient reads what was settled when it was
+    delivered — for a service that is an alias where a name would be. Whoever uses
+    a **passed-on** identifier sees the original sender, like anybody holding an
+    identifier: it is not a leak of the alias promise but the capability approach,
+    and what somebody puts in your hand on purpose you may read.
+
+    A service always has a delivery of its own for anything it received, because
+    an identifier only ever reaches it through its own mailbox.
+    """
+    if not is_id(message_id):
+        raise refusals.UnknownIdentifier("message")
+    realm_id = getattr(caller, "realm_id", None)
+    if realm_id is None:
+        raise refusals.UnknownIdentifier("message")
+    stored = context.holdings.message(realm_id, message_id)
+    if stored is None:
+        # Unknown, or in another realm — the same answer, because telling a caller
+        # that something exists elsewhere would make an identifier a way of asking
+        # about other people's holdings.
+        raise refusals.UnknownIdentifier("message")
+
+    shown = Participant(kind=stored.sender["kind"], name=stored.sender["name"])
+    if isinstance(caller, Peer | Service):
+        for view in (INBOX, OUTBOX):
+            for entry in context.holdings.mailbox_entries(mailbox_of(context, caller, view)):
+                if entry.message_id == message_id:
+                    shown = Participant(kind=entry.sender["kind"], name=entry.sender["name"])
+                    break
+            else:
+                continue
+            break
+
+    return Envelope(
+        message_id=stored.id,
+        sender=shown,
+        recipients=[Participant(kind=r["kind"], name=r["name"]) for r in stored.recipients],
+        sent_at=stored.created_at,
+        subject=context.holdings.message_subject(realm_id, message_id) or "",
+        body_size=stored.body_size,
+        total_size=stored.total_size,
+        attachments=stored.attachments,
+        in_reply_to=stored.in_reply_to,
+    )
+
+
+def subject_of(context: Context, caller: Caller, message_id: str) -> str:
+    return envelope(context, caller, message_id).subject
+
+
+def body_of(context: Context, caller: Caller, message_id: str) -> str:
+    """The body, raw. The service has never looked at it."""
+    envelope(context, caller, message_id)
+    realm_id = getattr(caller, "realm_id", "")
+    return context.holdings.message_body(realm_id, message_id) or ""
+
+
+# -------------------------------------------------------------------- the files
+
+
+def deposit_file(context: Context, caller: Peer | Service, content: bytes) -> tuple[str, int]:
+    """Keep a file. It belongs to the depositor's realm and to no message yet."""
+    if len(content) > context.config.file_max_bytes:
+        raise refusals.TooLarge(
+            "file", limit=context.config.file_max_bytes, actual=len(content), unit="bytes"
+        )
+    stored = context.holdings.put_file(caller.realm_id, new_id(), content)
+    return stored.id, stored.size
+
+
+def fetch_file(context: Context, caller: Caller, file_id: str) -> bytes:
+    """Whoever has the identifier may fetch it. Only the realm is checked.
+
+    The identifier is the permission, and it is not checked whether the fetcher
+    was an addressed recipient. The realm is the outer boundary of every
+    identifier, and a fetch from another realm looks exactly like a fetch of
+    something that does not exist.
+    """
+    if not is_id(file_id):
+        raise refusals.UnknownIdentifier("file")
+    realm_id = getattr(caller, "realm_id", None)
+    if realm_id is None:
+        raise refusals.UnknownIdentifier("file")
+    content = context.holdings.file_content(realm_id, file_id)
+    if content is None:
+        raise refusals.UnknownIdentifier("file")
+    return content
+
+
+# -------------------------------------------------------------- the observation
+
+
+def team_traffic(
+    context: Context, observer: Observer, team_id: str, *, offset: int, limit: int
+) -> list[Envelope]:
+    """Everything that happened in one team, newest first.
+
+    Read from the messages of the realm rather than from a mailbox: an observer has
+    no mailbox, and the traffic of a team is not anybody's delivery. What they see
+    is therefore the message's own envelope — the true sender, which is the point
+    of watching.
+    """
+    found = []
+    messages = context.holdings.layout.messages(observer.realm_id)
+    if not messages.is_dir():
+        return []
+    for entry in sorted((p.name for p in messages.iterdir() if p.is_dir()), reverse=True):
+        stored = context.holdings.message(observer.realm_id, entry)
+        if stored is None or stored.team_id != team_id:
+            continue
+        found.append(
+            Envelope(
+                message_id=stored.id,
+                sender=Participant(kind=stored.sender["kind"], name=stored.sender["name"]),
+                recipients=[Participant(kind=r["kind"], name=r["name"]) for r in stored.recipients],
+                sent_at=stored.created_at,
+                subject=context.holdings.message_subject(observer.realm_id, stored.id) or "",
+                body_size=stored.body_size,
+                total_size=stored.total_size,
+                attachments=stored.attachments,
+                in_reply_to=stored.in_reply_to,
+            )
+        )
+    found.sort(key=lambda e: e.sent_at, reverse=True)
+    return found[offset : offset + limit]
