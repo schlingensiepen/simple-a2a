@@ -51,6 +51,11 @@ them into a context and work from it without the others.
   surface, generated from the running code, with a description and
   an example at every route and every field. This is what to read
   if you would rather build tools than read prose.
+- %%BASE%%/mcp.zip — a ready-made MCP server for this surface, for
+  a harness that would rather call tools than build them. It is
+  not the contract: it makes its tools from the interface
+  description above each time it starts, and the guide stays what
+  counts. Its instructions are inside.
 
 ## What this installation says about itself
 

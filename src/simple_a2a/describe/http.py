@@ -10,7 +10,8 @@ are answered by the application itself, before any operation is reached.
 
 The seven token-free routes are built once, from a parameter, for the same reason
 the gate is one gate: three copies of the same seven routes drift the moment
-somebody fixes one.
+somebody fixes one. The participant surface adds an eighth, the MCP package, by
+the same parameter.
 """
 
 from __future__ import annotations
@@ -23,10 +24,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, FastAPI, Header, Path, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.routing import APIRoute
 
 from simple_a2a.core.base_address import base_address
 from simple_a2a.core.clock import now_iso
-from simple_a2a.describe import package
+from simple_a2a.describe import mcp_package, package
 from simple_a2a.describe.guide import GUIDE, Guide
 from simple_a2a.describe.rejections import Rejection, Type
 from simple_a2a.describe.teaching import Register
@@ -50,7 +52,7 @@ Authorization = Annotated[
     Header(
         description="The token, as `Bearer <token>`. Every operation except the entry, "
         "the guide, the health check, the build stamp, the interface description and the "
-        "skill package needs one.",
+        "packages needs one.",
         examples=["Bearer <your token>"],
     ),
 ]
@@ -97,6 +99,17 @@ def prose(text: str, request: Request) -> Response:
     """Answer with prose, labelled the way the caller asked for it."""
     wants_markdown = "text/markdown" in (request.headers.get("accept") or "")
     return PlainTextResponse(text, media_type=MARKDOWN if wants_markdown else PLAIN)
+
+
+def identifier_of(route: APIRoute) -> str:
+    """An operation's identifier in the description: the name it has in the code.
+
+    The framework's default glues the path and the verb onto the name, which makes
+    every identifier unique and none of them readable. Ours are unique per surface
+    already — a test says so — and whoever generates a client from the description
+    gets `send_to_peers` rather than `send_to_peers_peers_messages_post`.
+    """
+    return route.name
 
 
 def rejected(rejection: Rejection) -> JSONResponse:
@@ -250,13 +263,19 @@ def guide_of(request: Request, surface: str) -> Guide:
     )
 
 
-def cascade(surface: str, *, description: str, build: dict[str, str]) -> APIRouter:
+def cascade(
+    surface: str, *, description: str, build: dict[str, str], offers_mcp: bool = False
+) -> APIRouter:
     """The seven token-free routes, built once from a parameter.
 
     Every one of them answers without a token, and the entry answers **the same
     thing always, with status 200**: it does not read the holdings and has no second
     mode of operation. An instance that has nothing in it looks exactly like one
     that is in use.
+
+    The participant surface has an eighth, the MCP package, and only that surface:
+    it is the one where agents do their work, and the only one a ready-made set of
+    tools is offered for.
     """
     router = APIRouter()
 
@@ -313,6 +332,35 @@ def cascade(surface: str, *, description: str, build: dict[str, str]) -> APIRout
             media_type="application/zip",
             headers={"Content-Disposition": 'attachment; filename="skill.zip"'},
         )
+
+    if offers_mcp:
+        # Read once, when the surface is built: the package is the same bytes for
+        # every caller and every instance of this release, and a missing file is a
+        # broken build that should stop the start rather than surface as a 500.
+        archive = mcp_package.build_archive()
+
+        @router.get(
+            "/mcp.zip",
+            summary="A ready-made MCP server for this surface, for a harness that would "
+            "rather call tools than build them. Not the contract: its tools are made from "
+            "/openapi.json when it starts.",
+            response_class=Response,
+            responses={
+                200: {
+                    "description": "The program and its instructions, as a zip archive. "
+                    "The same bytes on every instance of the same release.",
+                    "content": {
+                        "application/zip": {"schema": {"type": "string", "format": "binary"}}
+                    },
+                }
+            },
+        )
+        async def mcp() -> Response:
+            return Response(
+                archive,
+                media_type="application/zip",
+                headers={"Content-Disposition": 'attachment; filename="mcp.zip"'},
+            )
 
     return router
 

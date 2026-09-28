@@ -88,6 +88,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         openapi_url="/openapi.json",
         docs_url=None,
         redoc_url=None,
+        generate_unique_id_function=http.identifier_of,
     )
     app.include_router(http.cascade(SURFACE, description=DESCRIPTION, build=build))
     http.install_handlers(app, register, surface_entry=lambda request: "/")

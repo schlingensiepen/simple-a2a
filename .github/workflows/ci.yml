@@ -10,8 +10,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with: { python-version: "3.13" }
       - run: uv sync --locked --extra dev
-      - run: uv run ruff check src tests tools
-      - run: uv run ruff format --check src tests tools
+      - run: uv run ruff check src tests tools mcp
+      - run: uv run ruff format --check src tests tools mcp
       - run: uv run pytest
       # Assertions vanish under -O. A suite that only ever runs without it
       # cannot tell an assert that carries a guarantee from one that records a

@@ -28,9 +28,20 @@ dev = ["pytest", "httpx", "ruff"]
 # operations, and the image's entry point is this one.
 simple-a2a = "simple_a2a.__main__:main"
 
+# The MCP program lives outside the package — it imports nothing from it — and is
+# served by the participant surface as `/mcp.zip`. An installed service has no
+# source tree to read it from, so the wheel carries a copy beside the module that
+# serves it. File by file rather than the directory, so that nothing beside the
+# two members can travel along. An editable install gets the copy as well, and
+# never reads it: the package is then imported from src/, next to which there is
+# no copy, so the files are read from mcp/ itself.
+[tool.hatch.build.targets.wheel.force-include]
+"mcp/README.md" = "simple_a2a/describe/mcp/README.md"
+"mcp/simple_a2a_mcp.py" = "simple_a2a/describe/mcp/simple_a2a_mcp.py"
+
 [tool.ruff]
 line-length = 100
-src = ["src", "tests", "tools"]
+src = ["src", "tests", "tools", "mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

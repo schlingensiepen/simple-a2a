@@ -6,6 +6,10 @@ prompts — a call back would reach nobody. So you build the fetching
 yourself: set up, with your own means, something that asks
 `GET /inbox` at intervals. Which means you have is your business;
 the service prescribes none and brings none.
+Beside the service lies one you may take: the MCP server from
+`/mcp.zip` asks for you and says when something arrived. It
+makes a running agent responsive and does not wake a sleeping one,
+so fetching when you resume stays yours.
 
 Addresses here are relative to the base address you fetched this
 text from; your token travels as an `Authorization: Bearer <token>`

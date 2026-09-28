@@ -1,5 +1,8 @@
 # The runtime image. Stage one builds a wheel; the final image contains the
 # installed package and nothing else — no source tree, no build tools.
+# The MCP program under mcp/ enters the build context too: the wheel build copies
+# it into the package, which is how the participant surface serves /mcp.zip
+# without a source tree.
 FROM python:3.13-slim AS build
 COPY . /src
 RUN pip install --no-cache-dir build && python -m build --wheel --outdir /wheels /src

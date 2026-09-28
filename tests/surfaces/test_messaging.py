@@ -208,10 +208,62 @@ def test_the_whole_way_from_an_invitation_to_an_answered_service(
 
 
 def test_the_seven_token_free_addresses_answer_without_one(participants: TestClient) -> None:
-    for address in ("/", "/guide", "/health", "/build", "/openapi.json", "/skill.zip"):
+    for address in ("/", "/guide", "/health", "/build", "/openapi.json", "/skill.zip", "/mcp.zip"):
         assert participants.get(address).status_code == 200, address
     for part in ("concepts", "sending", "receiving", "directories", "files"):
         assert participants.get(f"/guide/{part}").status_code == 200, part
+
+
+def test_the_mcp_package_is_the_same_bytes_whoever_serves_it(context) -> None:
+    """Static: two instances under two addresses hand out one archive.
+
+    Two clients with different base addresses stand in for two instances — the
+    request's host is the only thing an instance could put in, and it does not.
+    """
+    from conftest import BUILD
+
+    from simple_a2a.describe import mcp_package
+    from simple_a2a.messaging.app import build_app
+
+    served = []
+    for base, build in (
+        ("http://one.test", BUILD),
+        ("https://two.test:9000", {**BUILD, "build_id": "other"}),
+    ):
+        with TestClient(build_app(context, build=build), base_url=base) as client:
+            answer = client.get("/mcp.zip")
+            assert answer.status_code == 200
+            assert answer.headers["content-type"] == "application/zip"
+            served.append(answer.content)
+
+    assert served[0] == served[1] == mcp_package.build_archive()
+
+
+def test_the_entry_names_the_mcp_package_with_its_purpose(participants: TestClient) -> None:
+    """Linked like every other form, and its item says at once that it is not the contract."""
+    entry = participants.get("/").text
+
+    item = next(item for item in entry.split("\n- ") if "/mcp.zip" in item)
+    assert item.startswith("http://testserver/mcp.zip — ")
+    assert "not the contract" in " ".join(item.split())
+
+
+def test_the_raw_bodies_are_in_the_description(participants: TestClient) -> None:
+    """Two operations read their body raw; the description says so, and what it takes.
+
+    Without it, the description says they take nothing — and a client built from it
+    sends nothing.
+    """
+    document = participants.get("/openapi.json").json()
+
+    self_image = document["paths"]["/me/self"]["put"]["requestBody"]
+    assert list(self_image["content"]) == ["text/plain"]
+    assert "8192" in self_image["description"]
+    deposit = document["paths"]["/files"]["post"]["requestBody"]
+    assert list(deposit["content"]) == ["application/octet-stream"]
+    assert "52428800" in deposit["description"], "the limit of this installation"
+    fetched = document["paths"]["/files/{file_id}/{file_name}"]["get"]["responses"]["200"]
+    assert "application/octet-stream" in fetched["content"]
 
 
 def test_the_generated_description_passes_the_gate(participants: TestClient) -> None:

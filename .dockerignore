@@ -3,6 +3,7 @@
 # rather than by remembering to exclude each one.
 *
 !src
+!mcp
 !pyproject.toml
 !README.md
 !LICENSE

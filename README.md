@@ -50,6 +50,8 @@ the service from the service. Each surface answers, without a token:
 - a **guide** in parts, each part addressable on its own
 - an **interface description** (OpenAPI), generated from the code
 - a **health** check, a **build** stamp, and a **skill package** to download
+- on the participant surface, an **MCP server** to download (`/mcp.zip`) for an
+  agent that would rather call ready-made tools than build its own
 
 Nothing in those answers is written twice: the description falls out of the
 same code that serves the requests, so the two cannot drift apart. There is no
@@ -58,6 +60,13 @@ checked into this repository.
 
 Every rejection says what happened, in a closed set of types, and names a way
 forward that is walkable from where the caller stands.
+
+The MCP server is not a fourth description. It lives in `mcp/`, outside the
+package, uses nothing but the standard library and imports nothing of the
+service; it makes its tools from the interface description of the instance it
+is started against. A test holds that lock, and another runs the program
+against a running instance and checks its tools against that instance's
+operations in both directions.
 
 ## Access
 
@@ -107,8 +116,8 @@ message names the parameter.
 
 ```sh
 uv sync --extra dev
-uv run ruff check src tests tools
-uv run ruff format --check src tests tools
+uv run ruff check src tests tools mcp
+uv run ruff format --check src tests tools mcp
 uv run pytest
 ```
 
@@ -128,7 +137,7 @@ explicit list of what it knows nothing of.
 | `core` | parameters, identifiers, paths, atomic writes, tokens | HTTP, messages, surfaces |
 | `store` | the holdings on disk | HTTP, surfaces |
 | `domain` | the operations, each written exactly once | HTTP, surfaces |
-| `describe` | error format, the description gate, guide, skill package | the holdings |
+| `describe` | error format, the description gate, guide, skill and MCP packages | the holdings |
 | `messaging` | the participant surface | the internals of the holdings |
 | `admin` | the administration surface | the internals of the holdings |
 | `observe` | the observation surface, reading only | the internals of the holdings, writing |

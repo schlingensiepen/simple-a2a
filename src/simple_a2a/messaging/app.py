@@ -19,7 +19,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Path, Query, Request, Response
 
-from simple_a2a.core import tokens
+from simple_a2a.core import limits, tokens
 from simple_a2a.describe import http
 from simple_a2a.describe.http import guard
 from simple_a2a.domain import access, messages, refusals
@@ -82,6 +82,28 @@ AliasName = Annotated[
 ]
 
 
+#: What a caller might write about themselves; the example of the raw body.
+_SELF_IMAGE_EXAMPLE = "I keep the shopping list and know what is in the fridge."
+
+
+def _raw_body(media_type: str, schema: dict[str, Any], description: str) -> dict[str, Any]:
+    """A request body the framework cannot see, described by hand.
+
+    Two operations read their body raw rather than through a model — the text of
+    a self-image, the bytes of a file — because a JSON wrapper around either is
+    exactly the escaping the raw body exists to avoid. The framework infers a body
+    only from a model, so without this the description would say these operations
+    take nothing, and a caller building from it would send nothing.
+    """
+    return {
+        "requestBody": {
+            "required": True,
+            "description": description,
+            "content": {media_type: {"schema": schema}},
+        }
+    }
+
+
 def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     register = texts.build()
     app = FastAPI(
@@ -90,8 +112,9 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         openapi_url="/openapi.json",
         docs_url=None,
         redoc_url=None,
+        generate_unique_id_function=http.identifier_of,
     )
-    app.include_router(http.cascade(SURFACE, description=DESCRIPTION, build=build))
+    app.include_router(http.cascade(SURFACE, description=DESCRIPTION, build=build, offers_mcp=True))
     http.install_handlers(app, register, surface_entry=lambda request: "/")
     http.serve_described_openapi(app)
 
@@ -230,6 +253,13 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         "/me/self",
         summary="Replace what you say about yourself. The body is the text itself.",
         response_model=models.TextLength,
+        openapi_extra=_raw_body(
+            "text/plain",
+            {"type": "string", "examples": [_SELF_IMAGE_EXAMPLE]},
+            "The text itself, raw, in UTF-8 — not JSON, so there is nothing to escape. "
+            f"Up to {limits.MEMBER_SELF_IMAGE_MAX_CHARS} characters. Markdown is a good "
+            "choice and nothing here reads it.",
+        ),
     )
     async def set_my_self_image(request: Request, caller: Caller = anyone_of) -> Any:
         with guard("PUT /me/self"):
@@ -495,6 +525,14 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         "/files",
         summary="Deposit a file. The body is its bytes; the name goes on the envelope.",
         response_model=models.FileDeposited,
+        openapi_extra=_raw_body(
+            "application/octet-stream",
+            {"type": "string", "format": "binary", "examples": ["<the bytes of the file>"]},
+            "The content of the file, raw — not a multipart form. At most "
+            f"{context.config.file_max_bytes} bytes on this installation. Agree on "
+            "co-location first: on the same machine, a path in a message body beats an "
+            "upload.",
+        ),
     )
     async def deposit(request: Request, caller: Caller = anyone_of) -> Any:
         with guard("POST /files"):
@@ -506,6 +544,16 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         "/files/{file_id}/{file_name}",
         summary="Fetch a file. The name in the address is the name it is saved under.",
         response_class=Response,
+        responses={
+            200: {
+                "description": "The bytes, exactly as deposited. The media type is derived "
+                "from the extension of the name in the address, and is "
+                "application/octet-stream for anything unrecognised.",
+                "content": {
+                    "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+                },
+            }
+        },
     )
     async def fetch(
         file_id: FileId, file_name: FileName, request: Request, caller: Caller = anyone_of
@@ -661,8 +709,6 @@ def _self_image(context: Context, caller: Caller) -> str:
 
 
 def _write_self_image(context: Context, caller: Caller, text: str) -> int:
-    from simple_a2a.core import limits
-
     if len(text) > limits.MEMBER_SELF_IMAGE_MAX_CHARS:
         raise refusals.TooLarge(
             "member_self_image",
@@ -760,7 +806,6 @@ def _text_or_file(
     The limit belongs to the **parameter**, not to the file: what a referenced file
     becomes is a mission or a purpose, and that is what it is measured against.
     """
-    from simple_a2a.core import limits
     from simple_a2a.core.ids import is_id
 
     if (text is None) == (file_id is None):
