@@ -51,9 +51,21 @@ def _flush_directory(directory: Path) -> None:
         os.close(fd)
 
 
-def write_bytes(path: Path, data: bytes, *, mode: int = PRIVATE_MODE) -> None:
-    """Put these bytes at this path, completely or not at all."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+def write_bytes(
+    path: Path, data: bytes, *, mode: int = PRIVATE_MODE, create_parents: bool = True
+) -> None:
+    """Put these bytes at this path, completely or not at all.
+
+    `create_parents=False` is for writing *into* a thing that already exists and
+    can be moved to another state meanwhile. Creating the parent there would
+    bring the thing back to life where it used to be: a writer that lost a race
+    against a revocation left a second, half copy in the old state, and the next
+    move of the real one failed on it. Without the parent the write fails with
+    `FileNotFoundError`, which is the honest answer — the thing is not here any
+    more.
+    """
+    if create_parents:
+        path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".part")
     temporary = Path(temporary_name)
     try:
@@ -69,9 +81,41 @@ def write_bytes(path: Path, data: bytes, *, mode: int = PRIVATE_MODE) -> None:
     _flush_directory(path.parent)
 
 
-def write_text(path: Path, text: str, *, mode: int = PRIVATE_MODE) -> None:
+def write_text(
+    path: Path, text: str, *, mode: int = PRIVATE_MODE, create_parents: bool = True
+) -> None:
     """The same, for text. UTF-8, because everything here is UTF-8."""
-    write_bytes(path, text.encode("utf-8"), mode=mode)
+    write_bytes(path, text.encode("utf-8"), mode=mode, create_parents=create_parents)
+
+
+def write_once(path: Path, text: str, *, mode: int = PRIVATE_MODE) -> bool:
+    """Put this text at this path if nothing is there yet. True if it was ours.
+
+    Complete or not at all, like `write_bytes`, and **first writer wins**: the
+    content goes to a temporary file, and a hard link gives it its name — `link`
+    refuses an existing name the way exclusive creation does, but only ever
+    shows a file that is already whole. Nothing is ever read, changed and written
+    back, so there is no update to lose.
+
+    The parent is never created (see `write_bytes`): if the directory has moved
+    on, this raises `FileNotFoundError`.
+    """
+    handle, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".part")
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return False
+    finally:
+        temporary.unlink(missing_ok=True)
+    _flush_directory(path.parent)
+    return True
 
 
 def move(source: Path, target: Path) -> None:

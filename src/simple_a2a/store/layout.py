@@ -33,7 +33,7 @@ Two consequences are worth stating before the tree:
               members/
                 by-name/<key>       taken for good, revoked or not
                 active/<member_id>/     meta.json, mission, self-image
-                revoked/<member_id>/
+                revoked/<member_id>/    the same, and revoked-at
               mailboxes/<member_id>/
                 inbox/<message_id>        the envelope as this member sees it
                 outbox/<message_id>
@@ -51,8 +51,8 @@ Two consequences are worth stating before the tree:
           invitations/
             by-name/<kind>/<key>
             open/<invitation_id>/
-            consumed/<invitation_id>/
-            revoked/<invitation_id>/
+            consumed/<invitation_id>/       and consumed-at
+            revoked/<invitation_id>/        and revoked-at
           messages/<message_id>/    meta.json, subject, body
           files/<file_id>/          meta.json, content
           aliases/
@@ -84,6 +84,14 @@ from simple_a2a.core.names import comparison_key
 
 #: The file every object keeps its non-text fields in.
 META = "meta.json"
+
+#: When a thing reached its present state — one file each, written once, by the
+#: first who moved it there. Kept out of `meta.json` on purpose: a stamp inside
+#: the record was lost whenever somebody else rewrote the record at the same
+#: moment (appointing a realm master while a revocation ran), and the revocation
+#: then reported "revoked" with no "when".
+REVOKED_AT = "revoked-at"
+CONSUMED_AT = "consumed-at"
 
 #: The file a mailbox entry is. One per delivery, holding the envelope as its
 #: recipient sees it — which for a service means an alias where a name would be.

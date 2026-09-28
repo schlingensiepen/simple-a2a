@@ -45,7 +45,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -55,10 +55,12 @@ from simple_a2a.store.layout import (
     BY_DELIVERY,
     BY_NAME,
     BY_VALUE,
+    CONSUMED_AT,
     ENTRY_SEPARATOR,
     ENVELOPE,
     MAILBOXES,
     META,
+    REVOKED_AT,
     Layout,
     State,
 )
@@ -121,6 +123,13 @@ class Located[T]:
     state: State
 
 
+#: Which record field a state's stamp file fills, and the file's name.
+_STAMPS = {
+    State.REVOKED: ("revoked_at", REVOKED_AT),
+    State.CONSUMED: ("consumed_at", CONSUMED_AT),
+}
+
+
 class Holdings:
     """The holdings under one data directory."""
 
@@ -139,13 +148,71 @@ class Holdings:
         texts: dict[str, str | bytes] | None = None,
         *,
         as_file: str = META,
+        create: bool = True,
     ) -> None:
-        atomic.write_text(directory / as_file, record.to_json())
+        atomic.write_text(directory / as_file, record.to_json(), create_parents=create)
         for name, value in (texts or {}).items():
             if isinstance(value, bytes):
-                atomic.write_bytes(directory / name, value)
+                atomic.write_bytes(directory / name, value, create_parents=create)
             else:
-                atomic.write_text(directory / name, value)
+                atomic.write_text(directory / name, value, create_parents=create)
+
+    def _change_state(self, source: Path, target: Path, stamp: str) -> bool:
+        """Move a thing to its next state, stamped. False if somebody else got there first.
+
+        The stamp is written before the move, so the thing arrives in its new state
+        complete: a second revocation reports the timestamp of the first, and a
+        reader in between never sees "revoked" without a "when". It is its own
+        file, written once — the first stamp stands, and nobody rewriting the
+        record can take it away again.
+
+        Two writers can both find the thing in its old state. The rename decides
+        between them — only one of two renames of the same directory succeeds —
+        and the loser learns it from a missing file, never from a crash: nothing
+        here creates the old directory again, so its stamp or its move finds
+        nothing. Before this, the loser's write recreated the old directory behind
+        the winner's move, and its own move then failed on it: a redemption race
+        answered with a server error and left a spent voucher looking open.
+
+        A stamp can travel with a thing into a state it was not meant for — a
+        revocation that lost to a redemption leaves its `revoked-at` in the
+        consumed directory. Harmless, because a stamp is only read for the state
+        the thing is in.
+        """
+        try:
+            atomic.write_once(source / stamp, now_iso() + "\n")
+            atomic.move(source, target)
+        except FileNotFoundError:
+            return False
+        return True
+
+    def _get_in[T: Record](self, directory: Path, kind: type[T], state: State) -> T | None:
+        """A record as it stands in this state, with the moment it got there.
+
+        The stamp file wins over a field in the record; the field is still read
+        for holdings written before the stamps had files of their own.
+        """
+        found = self._get(directory, kind)
+        if found is None or state not in _STAMPS:
+            return found
+        field, name = _STAMPS[state]
+        stamped = self._claimed(directory / name)
+        return replace(found, **{field: stamped}) if stamped else found
+
+    @staticmethod
+    def _write_into(where: Callable[[State], Path], state: State, name: str, text: str) -> None:
+        """Write a file into a thing that may be revoked while we write.
+
+        Things only ever move forward to "revoked", so a write that finds its
+        directory gone follows it there once. Nothing is recreated behind the
+        move.
+        """
+        for attempt in dict.fromkeys((state, State.REVOKED)):
+            try:
+                atomic.write_text(where(attempt) / name, text, create_parents=False)
+                return
+            except FileNotFoundError:
+                continue
 
     @staticmethod
     def _get[T: Record](directory: Path, kind: type[T], *, as_file: str = META) -> T | None:
@@ -276,7 +343,9 @@ class Holdings:
 
     def member(self, realm_id: str, team_id: str, member_id: str) -> Located[Member] | None:
         for state in (State.ACTIVE, State.REVOKED):
-            found = self._get(self.layout.member(realm_id, team_id, member_id, state), Member)
+            found = self._get_in(
+                self.layout.member(realm_id, team_id, member_id, state), Member, state
+            )
             if found is not None:
                 return Located(record=found, state=state)
         return None
@@ -306,7 +375,9 @@ class Holdings:
     def members(self, realm_id: str, team_id: str) -> Iterator[Located[Member]]:
         for state in (State.ACTIVE, State.REVOKED):
             for member_id in self.member_ids(realm_id, team_id, state):
-                found = self._get(self.layout.member(realm_id, team_id, member_id, state), Member)
+                found = self._get_in(
+                    self.layout.member(realm_id, team_id, member_id, state), Member, state
+                )
                 if found is not None:
                     yield Located(record=found, state=state)
 
@@ -323,28 +394,37 @@ class Holdings:
     def set_member_self_image(
         self, realm_id: str, team_id: str, member_id: str, state: State, text: str
     ) -> None:
-        atomic.write_text(
-            self.layout.member(realm_id, team_id, member_id, state) / SELF_IMAGE, text
+        self._write_into(
+            lambda s: self.layout.member(realm_id, team_id, member_id, s), state, SELF_IMAGE, text
         )
 
     def revoke_member(self, realm_id: str, team_id: str, member_id: str) -> bool:
         """Move the directory. Idempotent, because revoking twice is allowed."""
-        source = self.layout.member(realm_id, team_id, member_id, State.ACTIVE)
-        if not source.is_dir():
-            return False
-        record = self._get(source, Member)
-        if record is not None:
-            self._put(source, Member(**{**_fields(record), "revoked_at": now_iso()}))
-        atomic.move(source, self.layout.member(realm_id, team_id, member_id, State.REVOKED))
-        return True
+        return self._change_state(
+            self.layout.member(realm_id, team_id, member_id, State.ACTIVE),
+            self.layout.member(realm_id, team_id, member_id, State.REVOKED),
+            REVOKED_AT,
+        )
 
     def set_realm_master(self, realm_id: str, team_id: str, member_id: str, value: bool) -> bool:
-        located = self.member(realm_id, team_id, member_id)
-        if located is None:
-            return False
-        directory = self.layout.member(realm_id, team_id, member_id, located.state)
-        self._put(directory, Member(**{**_fields(located.record), "is_realm_master": value}))
-        return True
+        # Read and written again if a revocation moves the member in between: the
+        # right is kept on the record wherever the record is, and never written into
+        # a directory that has already moved on.
+        for _ in range(2):
+            located = self.member(realm_id, team_id, member_id)
+            if located is None:
+                return False
+            directory = self.layout.member(realm_id, team_id, member_id, located.state)
+            try:
+                self._put(
+                    directory,
+                    Member(**{**_fields(located.record), "is_realm_master": value}),
+                    create=False,
+                )
+            except FileNotFoundError:
+                continue
+            return True
+        return False
 
     # --------------------------------------------------------------- services
 
@@ -368,7 +448,7 @@ class Holdings:
 
     def service(self, realm_id: str, service_id: str) -> Located[Service] | None:
         for state in (State.ACTIVE, State.REVOKED):
-            found = self._get(self.layout.service(realm_id, service_id, state), Service)
+            found = self._get_in(self.layout.service(realm_id, service_id, state), Service, state)
             if found is not None:
                 return Located(record=found, state=state)
         return None
@@ -380,7 +460,9 @@ class Holdings:
     def services(self, realm_id: str) -> Iterator[Located[Service]]:
         for state in (State.ACTIVE, State.REVOKED):
             for service_id in self._ids_in(self.layout.services(realm_id) / state):
-                found = self._get(self.layout.service(realm_id, service_id, state), Service)
+                found = self._get_in(
+                    self.layout.service(realm_id, service_id, state), Service, state
+                )
                 if found is not None:
                     yield Located(record=found, state=state)
 
@@ -390,17 +472,16 @@ class Holdings:
     def set_service_self_image(
         self, realm_id: str, service_id: str, state: State, text: str
     ) -> None:
-        atomic.write_text(self.layout.service(realm_id, service_id, state) / SELF_IMAGE, text)
+        self._write_into(
+            lambda s: self.layout.service(realm_id, service_id, s), state, SELF_IMAGE, text
+        )
 
     def revoke_service(self, realm_id: str, service_id: str) -> bool:
-        source = self.layout.service(realm_id, service_id, State.ACTIVE)
-        if not source.is_dir():
-            return False
-        record = self._get(source, Service)
-        if record is not None:
-            self._put(source, Service(**{**_fields(record), "revoked_at": now_iso()}))
-        atomic.move(source, self.layout.service(realm_id, service_id, State.REVOKED))
-        return True
+        return self._change_state(
+            self.layout.service(realm_id, service_id, State.ACTIVE),
+            self.layout.service(realm_id, service_id, State.REVOKED),
+            REVOKED_AT,
+        )
 
     # -------------------------------------------------------------- observers
 
@@ -422,7 +503,9 @@ class Holdings:
 
     def observer(self, realm_id: str, observer_id: str) -> Located[Observer] | None:
         for state in (State.ACTIVE, State.REVOKED):
-            found = self._get(self.layout.observer(realm_id, observer_id, state), Observer)
+            found = self._get_in(
+                self.layout.observer(realm_id, observer_id, state), Observer, state
+            )
             if found is not None:
                 return Located(record=found, state=state)
         return None
@@ -434,19 +517,18 @@ class Holdings:
     def observers(self, realm_id: str) -> Iterator[Located[Observer]]:
         for state in (State.ACTIVE, State.REVOKED):
             for observer_id in self._ids_in(self.layout.observers(realm_id) / state):
-                found = self._get(self.layout.observer(realm_id, observer_id, state), Observer)
+                found = self._get_in(
+                    self.layout.observer(realm_id, observer_id, state), Observer, state
+                )
                 if found is not None:
                     yield Located(record=found, state=state)
 
     def revoke_observer(self, realm_id: str, observer_id: str) -> bool:
-        source = self.layout.observer(realm_id, observer_id, State.ACTIVE)
-        if not source.is_dir():
-            return False
-        record = self._get(source, Observer)
-        if record is not None:
-            self._put(source, Observer(**{**_fields(record), "revoked_at": now_iso()}))
-        atomic.move(source, self.layout.observer(realm_id, observer_id, State.REVOKED))
-        return True
+        return self._change_state(
+            self.layout.observer(realm_id, observer_id, State.ACTIVE),
+            self.layout.observer(realm_id, observer_id, State.REVOKED),
+            REVOKED_AT,
+        )
 
     # ------------------------------------------------------------ invitations
 
@@ -498,7 +580,7 @@ class Holdings:
 
     def _invitation(self, realm_id: str, digest: str) -> Located[Invitation] | None:
         for state in (State.OPEN, State.CONSUMED, State.REVOKED):
-            found = self._get(self.layout.invitation(realm_id, digest, state), Invitation)
+            found = self._get_in(self.layout.invitation(realm_id, digest, state), Invitation, state)
             if found is not None:
                 return Located(record=found, state=state)
         return None
@@ -512,7 +594,9 @@ class Holdings:
     def invitations(self, realm_id: str, kind: str | None = None) -> Iterator[Located[Invitation]]:
         for state in (State.OPEN, State.CONSUMED, State.REVOKED):
             for digest in self._ids_in(self.layout.invitations(realm_id) / state):
-                found = self._get(self.layout.invitation(realm_id, digest, state), Invitation)
+                found = self._get_in(
+                    self.layout.invitation(realm_id, digest, state), Invitation, state
+                )
                 if found is not None and (kind is None or found.kind == kind):
                     yield Located(record=found, state=state)
 
@@ -520,23 +604,20 @@ class Holdings:
         return self._text(self.layout.invitation(realm_id, digest, state) / MISSION)
 
     def consume_invitation(self, realm_id: str, voucher: str) -> bool:
-        return self._move_invitation(realm_id, token_hash(voucher), State.CONSUMED, "consumed_at")
+        return self._move_invitation(realm_id, token_hash(voucher), State.CONSUMED)
 
     def revoke_invitation_named(self, realm_id: str, kind: str, display_name: str) -> bool:
         digest = self._claimed(self.layout.invitation_by_name(realm_id, kind, display_name))
         if digest is None:
             return False
-        return self._move_invitation(realm_id, digest, State.REVOKED, "revoked_at")
+        return self._move_invitation(realm_id, digest, State.REVOKED)
 
-    def _move_invitation(self, realm_id: str, digest: str, state: State, stamp: str) -> bool:
-        source = self.layout.invitation(realm_id, digest, State.OPEN)
-        if not source.is_dir():
-            return False
-        record = self._get(source, Invitation)
-        if record is not None:
-            self._put(source, Invitation(**{**_fields(record), stamp: now_iso()}))
-        atomic.move(source, self.layout.invitation(realm_id, digest, state))
-        return True
+    def _move_invitation(self, realm_id: str, digest: str, state: State) -> bool:
+        return self._change_state(
+            self.layout.invitation(realm_id, digest, State.OPEN),
+            self.layout.invitation(realm_id, digest, state),
+            CONSUMED_AT if state is State.CONSUMED else REVOKED_AT,
+        )
 
     # ----------------------------------------------------------------- tokens
 
