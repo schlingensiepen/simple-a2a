@@ -36,11 +36,12 @@ arguments stand in the process list where anybody on the machine can read them:
 | Variable | What it holds |
 |---|---|
 | `A2A_MCP_ADDRESS` | The base address of the participant surface, as its entry names it — for example `https://a2a.example.org`. |
-| `A2A_MCP_TOKEN` | The token of the one identity this server acts as. |
+| `A2A_MCP_TOKEN` | The token of the one identity this server acts as. Leave it unset if you were handed an invitation instead — see below. |
 | `A2A_MCP_POLL_SECONDS` | Optional. How often the inbox is asked while you are subscribed to it. 15 if unset. |
 
-If one of the first two is missing, the server does not start and says on
-standard error which one. The token never appears in anything the server writes.
+Without an address the server does not start, and says so on standard error.
+Without a token it starts, and redeeming is the one thing that will work. The
+token it runs with never appears in anything the server writes.
 
 ## Registering it in a harness
 
@@ -64,22 +65,33 @@ between them:
 
 Keep the token where your harness keeps secrets, not in a file you share.
 
+## Starting with an invitation
+
+If you were given an invitation rather than a token, register the server with
+the address only and no `A2A_MCP_TOKEN`. It starts, offers every tool, and tells
+you on connecting that only redeeming will work: call the `redeem` tool with your
+invitation. Its answer carries your token — once, because that is the one moment
+it exists, so keep it where your harness keeps secrets. Then register a second
+entry with the same address and that token, and work there. Every other tool of
+the tokenless instance is refused by the service itself with `kein-token` and its
+explanation; nothing in this program decides that on the service's behalf.
+
 ## One instance per identity
 
 One process carries exactly one pair of address and token. If you hold two
 identities — two teams, or two installations — register the server twice, under
 two names, each with its own pair. There is deliberately no parameter that picks
-a token per call: a pair that stays a pair cannot send with the wrong half.
-
-Redeeming an invitation is not a tool. It is what gives you a token, so it
-happens before this server can be started: `POST /invitations/redeem` on the
-participant surface, as its guide describes.
+a token per call: a pair that stays a pair cannot send with the wrong half. An
+invitation to a second identity is redeemed with the `redeem` tool of any
+instance; the token it gives you belongs in a new instance, not in this one.
 
 ## What the tools are
 
-One tool per operation of the participant surface that takes a token, named after
-the operation's identifier in `/openapi.json` and described with its text. Three
-are adapted by hand, because a pipe cannot carry what the operation takes or gives:
+One tool per operation of the participant surface — everything except the
+addresses that describe the service (entry, guide, interface description,
+packages, health, build) — named after the operation's identifier in
+`/openapi.json` and described with its text. Three are adapted by hand, because a
+pipe cannot carry what the operation takes or gives:
 
 - **Depositing a file** takes a `path` on this machine and sends the bytes. Agree
   with the other agent first whether you run on the same machine; if you do, send
@@ -91,6 +103,10 @@ are adapted by hand, because a pipe cannot carry what the operation takes or giv
 When the service refuses a call, the tool result is marked as an error and carries
 the HTTP status, the rejection type and the teaching text exactly as the service
 sent them.
+
+Calls are handled one after the other. A slow call — a large file on a slow line —
+delays the next one, and a cancellation is read only once the call before it has
+finished.
 
 ## Notifications, and their limit
 

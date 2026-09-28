@@ -4,24 +4,27 @@
 **This program is not the contract.** The contract is the self-description of the
 installation it is started against: the entry at the base address, the guide under
 `/guide`, and the interface description at `/openapi.json`. Every tool offered here
-is generated from that description when the program starts — one tool per operation
-that takes a token — so a tool cannot describe an operation the installation does
-not have, and an operation cannot be missing a tool. Where a pipe cannot carry what
-an operation takes or gives, the tool is adapted by hand, and only there: a file is
-deposited **from a local path**, a file is fetched **to a local path**, and a raw
-text body is a plain string argument.
+is generated from that description when the program starts — one tool per
+operation, everything but the self-description — so a tool cannot describe an
+operation the installation does not have, and an operation cannot be missing a
+tool. Where a pipe cannot carry what an operation takes or gives, the tool is
+adapted by hand, and only there: a file is deposited **from a local path**, a file
+is fetched **to a local path**, and a raw text body is a plain string argument.
 
-**One process, one identity.** It is started with exactly one base address and one
-token, both from the environment rather than the command line, because arguments
-stand in the process list for anybody to read. Whoever holds two identities starts
-two processes; a parameter deciding which token to send with would be the one
-mistake this shape rules out.
+**One process, one identity.** It is started with exactly one base address and at
+most one token, both from the environment rather than the command line, because
+arguments stand in the process list for anybody to read. Whoever holds two
+identities starts two processes; a parameter deciding which token to send with
+would be the one mistake this shape rules out. Started without a token it offers
+the same tools — and redeeming an invitation is the one that will work, which is
+how somebody who was handed an invitation rather than a token gets going.
 
 **Only the standard library.** Nothing else is installed next to an agent to run
 this, so nothing else can break it or be broken into through it. The price is that
 the protocol is spoken here by hand: JSON-RPC 2.0, one message per line, over
 standard input and output. Standard output carries protocol messages and nothing
-else; everything meant for a human goes to standard error.
+else; everything meant for a human goes to standard error. Messages are handled one
+after the other, so a slow call delays the next — a cancellation included.
 
 **Two protocol eras.** Revision 2026-07-28 made the protocol stateless: every
 request carries its version in `_meta`, `server/discover` replaces the handshake,
@@ -118,8 +121,10 @@ def log(message: str) -> None:
     sys.stderr.flush()
 
 
-#: The token of this process, once it is known, so that nothing leaving the
-#: process can carry it — not a log line, not a tool result, not an error.
+#: The token this process runs with, once it is known, so that nothing leaving the
+#: process can carry it — not a log line, not a tool result, not an error. Only this
+#: one: a token *redeemed* through a tool is a different string, and its one
+#: appearance, in that tool's result, is the point of redeeming.
 _SECRET: list[str] = []
 
 
@@ -143,25 +148,23 @@ class StartRefused(Exception):
 @dataclass(frozen=True)
 class Settings:
     address: str
-    token: str
+    #: None when started with an invitation rather than a token: then redeeming is
+    #: the one call that will succeed, and every other one is refused by the
+    #: service itself, in its own words.
+    token: str | None
     poll_seconds: float
 
     @classmethod
     def from_environment(cls, environment: dict[str, str] | os._Environ[str]) -> Settings:
-        """Both halves of the pair, or a refusal naming every half that is missing."""
+        """The address, or a refusal naming it; the token if there is one."""
         address = (environment.get(ADDRESS_VARIABLE) or "").strip()
-        token = (environment.get(TOKEN_VARIABLE) or "").strip()
-        missing = [
-            name
-            for name, value in ((ADDRESS_VARIABLE, address), (TOKEN_VARIABLE, token))
-            if not value
-        ]
-        if missing:
+        token = (environment.get(TOKEN_VARIABLE) or "").strip() or None
+        if not address:
             raise StartRefused(
-                f"{' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} not set. "
-                f"Start this program with {ADDRESS_VARIABLE} set to the base address of the "
-                f"participant surface and {TOKEN_VARIABLE} set to the token of the one "
-                "identity it acts as — both in the environment, not on the command line.",
+                f"{ADDRESS_VARIABLE} is not set. Start this program with {ADDRESS_VARIABLE} "
+                "set to the base address of the participant surface and, once you have one, "
+                f"{TOKEN_VARIABLE} set to the token of the one identity it acts as — both in "
+                "the environment, not on the command line.",
                 2,
             )
         if not address.startswith(("http://", "https://")):
@@ -219,7 +222,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 class Service:
     """The participant surface, as an ordinary HTTP client sees it."""
 
-    def __init__(self, address: str, token: str) -> None:
+    def __init__(self, address: str, token: str | None) -> None:
         self.address = address
         self._token = token
         self._opener = urllib.request.build_opener(_NoRedirect())
@@ -248,7 +251,7 @@ class Service:
         with_token: bool = True,
     ) -> Answer:
         sent = dict(headers or {})
-        if with_token:
+        if with_token and self._token:
             sent["Authorization"] = f"Bearer {self._token}"
         if content_type is not None:
             sent["Content-Type"] = content_type
@@ -285,6 +288,9 @@ class Operation:
     name: str
     description: str
     input_schema: dict[str, Any]
+    #: Whether the operation reads a token. Only then is one sent: redeeming an
+    #: invitation never sees the token of the instance that redeems.
+    takes_token: bool = True
     parameters: dict[str, str] = field(default_factory=dict)  # argument -> where it goes
     body_kind: str | None = None  # "json", "text" or "file"
     body_content_type: str | None = None
@@ -332,6 +338,17 @@ def inline(node: Any, document: dict[str, Any], seen: tuple[str, ...] = ()) -> A
     return node
 
 
+def _self_description(method: str, parameters: list[dict[str, Any]]) -> bool:
+    """A token-free read: the entry, the guide, the packages, health, build.
+
+    They describe the service rather than use it, and an agent reads them as they
+    are. Everything else is an operation and becomes a tool — redeeming an
+    invitation too, which takes no token and is exactly what an instance started
+    without one is for.
+    """
+    return method == "get" and not _takes_a_token(parameters)
+
+
 def _takes_a_token(parameters: list[dict[str, Any]]) -> bool:
     return any(
         parameter.get("in") == "header"
@@ -353,12 +370,9 @@ def _tool_name(operation: dict[str, Any], method: str, path: str) -> str:
 
 
 def operations_of(document: dict[str, Any]) -> list[Operation]:
-    """Every operation that takes a token, as a tool, in the order they are described.
+    """Every operation of the surface, as a tool, in the order they are described.
 
-    The token-free addresses — entry, guide, packages, health, build, the description
-    itself, and redeeming an invitation — are not tools. The first ones describe the
-    service rather than use it; redeeming is what produces a token, so it happens
-    before a process like this one can be started at all.
+    Only the self-description is left out; see `_self_description`.
     """
     found: list[Operation] = []
     names: set[str] = set()
@@ -369,9 +383,10 @@ def operations_of(document: dict[str, Any]) -> list[Operation]:
             if method.startswith("x-") or not isinstance(operation, dict):
                 continue
             parameters = inline(operation.get("parameters") or [], document)
-            if not _takes_a_token(parameters):
+            if _self_description(method.lower(), parameters):
                 continue
             made = _operation(document, method.upper(), path, operation, parameters)
+            made.takes_token = _takes_a_token(parameters)
             if made.name in names:
                 raise DescriptionError(f"two operations would both be the tool {made.name!r}")
             names.add(made.name)
@@ -570,6 +585,7 @@ def call(service: Service, operation: Operation, arguments: dict[str, Any]) -> d
             body=body,
             content_type=operation.body_content_type if body is not None else None,
             headers=headers,
+            with_token=operation.takes_token,
         )
     except Unreachable as failed:
         return _text_result(
@@ -611,7 +627,15 @@ def call(service: Service, operation: Operation, arguments: dict[str, Any]) -> d
 # ------------------------------------------------------------------ the server
 
 
-def instructions(address: str, poll_seconds: float) -> str:
+def instructions(address: str, poll_seconds: float, *, has_token: bool, redeem: str) -> str:
+    """What a harness is told first. The first sentence is the one that matters."""
+    without = (
+        f"This instance was started without a token, so only redeeming will work: call "
+        f"`{redeem}` with the invitation you were given. It answers with your token, "
+        f"once — that is the one moment it exists. Then start an instance of this server "
+        f"with {TOKEN_VARIABLE} set to that token and work there; every other tool here "
+        f"is refused by the service with `kein-token`.\n\n"
+    )
     return (
         f"This MCP server is not the contract. The contract is the self-description of "
         f"the simple-a2a participant surface at {address} — its entry at {address}/, the "
@@ -620,16 +644,19 @@ def instructions(address: str, poll_seconds: float) -> str:
         f"goes wrong otherwise. Every tool here was generated from that interface "
         f"description when this server started, one per operation; where a tool and the "
         f"guide seem to disagree, the guide is right.\n\n"
-        f"This server acts as exactly one identity, the one whose token it was started "
-        f"with. To act as another, start a second instance with that pair of address "
-        f"and token.\n\n"
+        + ("" if has_token else without)
+        + f"This server acts as exactly one identity, the one whose token it was started "
+        f"with. To act as another, redeem its invitation with `{redeem}` and start a "
+        f"second instance with the token that gives you — one instance per identity.\n\n"
         f"Your inbox is the resource {INBOX_URI}. Subscribe to it and this server asks "
         f"the service every {poll_seconds:g} seconds and tells you when it changed. That "
         f"makes a running agent responsive; it does not wake a sleeping one. While you "
         f"are not running nothing reaches you, so read your inbox whenever you resume.\n\n"
         f"Before you exchange a file, agree with the other agent whether you run on the "
         f"same machine; if you do, send a path in the body of a message instead of "
-        f"depositing the file."
+        f"depositing the file.\n\n"
+        f"Calls are handled one after the other: a slow call delays the next, a "
+        f"cancellation included."
     )
 
 
@@ -784,6 +811,10 @@ class Server:
         self.negotiated: str | None = None
         self.output: Output | None = None
         self.watch: Watch | None = None
+        #: Open `subscriptions/listen` requests, answered only when they end.
+        self.listening: list[Any] = []
+        redeeming = [op.name for op in tools if not op.takes_token]
+        self.redeem = redeeming[0] if redeeming else "the tool that redeems an invitation"
 
     # -- the loop --------------------------------------------------------
 
@@ -795,6 +826,20 @@ class Server:
                 line = raw.decode("utf-8", errors="replace").strip()
                 if line:
                     self.handle_line(line)
+            # The input is closed: the client is done. Every stream still open is
+            # ended with its closing result, so the client can tell an orderly end
+            # from a dropped connection.
+            for subscription in self.listening:
+                self.output.send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": subscription,
+                        "result": {
+                            "resultType": "complete",
+                            "_meta": {META_SUBSCRIPTION: subscription},
+                        },
+                    }
+                )
         finally:
             self.watch.stop()
 
@@ -832,9 +877,13 @@ class Server:
     def notification(self, method: str, params: Any) -> None:
         assert self.watch is not None
         if method == "notifications/cancelled" and isinstance(params, dict):
-            # Ends a listening stream. A plain request is answered before the next
-            # line is read, so there is nothing else left to cancel.
-            self.watch.close_stream(params.get("requestId"))
+            # Ends a listening stream, with no further message for it. A plain request
+            # is answered before the next line is read, so there is nothing else
+            # left to cancel.
+            subscription = params.get("requestId")
+            if subscription in self.listening:
+                self.listening.remove(subscription)
+            self.watch.close_stream(subscription)
 
     # -- dispatch --------------------------------------------------------
 
@@ -845,7 +894,6 @@ class Server:
             return self.initialize(params)
         era = self.era_of(method, params)
         handlers = {
-            "ping": dict,
             "tools/list": self.tools_list,
             "tools/call": lambda: self.tools_call(params),
             "resources/list": self.resources_list,
@@ -855,6 +903,8 @@ class Server:
             handlers["server/discover"] = self.discover
             handlers["subscriptions/listen"] = lambda: self.listen(identifier, params)
         else:
+            # Revision 2026-07-28 removed ping; the handshake revisions still have it.
+            handlers["ping"] = dict
             handlers["resources/subscribe"] = lambda: self.subscribe(params, era)
             handlers["resources/unsubscribe"] = lambda: self.unsubscribe(params, era)
         handler = handlers.get(method)
@@ -899,6 +949,14 @@ class Server:
 
     # -- the methods -----------------------------------------------------
 
+    def instructions(self) -> str:
+        return instructions(
+            self.settings.address,
+            self.settings.poll_seconds,
+            has_token=self.settings.token is not None,
+            redeem=self.redeem,
+        )
+
     def capabilities(self) -> dict[str, Any]:
         return {"tools": {}, "resources": {"subscribe": True}}
 
@@ -909,14 +967,14 @@ class Server:
             "protocolVersion": self.negotiated,
             "capabilities": self.capabilities(),
             "serverInfo": {"name": NAME, "version": VERSION},
-            "instructions": instructions(self.settings.address, self.settings.poll_seconds),
+            "instructions": self.instructions(),
         }
 
     def discover(self) -> dict[str, Any]:
         return {
             "supportedVersions": list(SUPPORTED),
             "capabilities": self.capabilities(),
-            "instructions": instructions(self.settings.address, self.settings.poll_seconds),
+            "instructions": self.instructions(),
             "ttlMs": LIST_TTL_MS,
             "cacheScope": "private",
         }
@@ -945,8 +1003,13 @@ class Server:
                 {"uri": params.get("uri")},
             )
 
-    def resources_read(self, params: dict[str, Any], era: str) -> dict[str, Any]:
-        self._known(params, era)
+    def _inbox(self) -> Answer:
+        """The inbox as the service answers it, or an error carrying its refusal.
+
+        Without a token — or with a revoked one — the service refuses, and that
+        refusal is what the client gets, as it was sent, rather than a subscription
+        that never hears anything.
+        """
         try:
             answer = self.service.request("GET", INBOX_PATH)
         except Unreachable as failed:
@@ -954,7 +1017,12 @@ class Server:
                 INTERNAL_ERROR, f"Could not reach the service at {self.service.address}: {failed}"
             ) from None
         if answer.status != 200:
-            raise ProtocolError(INTERNAL_ERROR, refusal_text(answer), {"status": answer.status})
+            raise ProtocolError(INTERNAL_ERROR, refusal_text(answer), _refusal_data(answer))
+        return answer
+
+    def resources_read(self, params: dict[str, Any], era: str) -> dict[str, Any]:
+        self._known(params, era)
+        answer = self._inbox()
         try:
             text = json.dumps(json.loads(answer.data.decode("utf-8")), ensure_ascii=False, indent=2)
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -964,6 +1032,7 @@ class Server:
     def subscribe(self, params: dict[str, Any], era: str) -> dict[str, Any]:
         assert self.watch is not None
         self._known(params, era)
+        self._inbox()
         self.watch.subscribe_legacy()
         return {}
 
@@ -980,9 +1049,11 @@ class Server:
         uris = wanted.get("resourceSubscriptions") if isinstance(wanted, dict) else None
         honoured: dict[str, Any] = {}
         if isinstance(uris, list) and INBOX_URI in uris:
+            self._inbox()
             honoured["resourceSubscriptions"] = [INBOX_URI]
         if honoured:
             self.watch.open_stream(identifier)
+        self.listening.append(identifier)
         self.output.send(
             {
                 "jsonrpc": "2.0",
@@ -990,6 +1061,16 @@ class Server:
                 "params": {"_meta": {META_SUBSCRIPTION: identifier}, "notifications": honoured},
             }
         )
+
+
+def _refusal_data(answer: Answer) -> dict[str, Any]:
+    """Status and type of a refusal, for a client that reads fields rather than text."""
+    data: dict[str, Any] = {"status": answer.status}
+    try:
+        data["type"] = json.loads(answer.data.decode("utf-8"))["type"]
+    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+        pass
+    return data
 
 
 def _error(identifier: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
@@ -1007,7 +1088,8 @@ def start(
 ) -> tuple[Settings, Service, list[Operation]]:
     """Everything that has to hold before the first message is read."""
     settings = Settings.from_environment(environment)
-    _SECRET.append(settings.token)
+    if settings.token:
+        _SECRET.append(settings.token)
     service = Service(settings.address, settings.token)
     try:
         document = service.description()
@@ -1045,7 +1127,8 @@ def main(arguments: list[str] | None = None) -> int:
     except StartRefused as refused:
         log(str(refused))
         return refused.status
-    log(f"{len(tools)} tools for {settings.address}, one identity; waiting on standard input")
+    who = "one identity" if settings.token else "no token yet — only redeeming will work"
+    log(f"{len(tools)} tools for {settings.address}, {who}; waiting on standard input")
     Server(settings, service, tools).run(sys.stdin.buffer, sys.stdout.buffer)
     return 0
 

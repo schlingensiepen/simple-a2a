@@ -50,11 +50,13 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
-def http(method: str, url: str, body: Any = None, token: str | None = None) -> tuple[int, Any]:
+def http(
+    method: str, url: str, body: Any = None, token: str | None = None, raw: bytes | None = None
+) -> tuple[int, Any]:
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    data = json.dumps(body).encode() if body is not None else None
+    data = json.dumps(body).encode() if body is not None else raw
     request = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=PATIENCE) as answer:
@@ -108,18 +110,57 @@ class Instance:
         except subprocess.TimeoutExpired:
             self.process.kill()
 
-    def member(self, name: str) -> str:
-        _, answer = http(
+    def invitation(self, name: str) -> str:
+        """An invitation from the operator, which carries the realm-master right."""
+        status, answer = http(
             "POST",
             f"{self.admin}/realms/household/teams/kitchen/invitations",
             {"member_name": name, "member_mission": f"{name} helps.", "display_name": name},
             ADMIN_SECRET,
         )
+        assert status == 200, answer
+        return answer["invitation"]
+
+    def redeem(self, voucher: str, **extra: str) -> str:
         status, redeemed = http(
-            "POST", f"{self.base}/invitations/redeem", {"invitation": answer["invitation"]}
+            "POST", f"{self.base}/invitations/redeem", {"invitation": voucher, **extra}
         )
         assert status == 200, redeemed
         return redeemed["token"]
+
+    def member(self, name: str) -> str:
+        return self.redeem(self.invitation(name))
+
+    def invited_by(self, inviter: str, name: str) -> str:
+        """A member invited by a member: in the team, without the realm-master right."""
+        status, answer = http(
+            "POST",
+            f"{self.base}/invitations/peer",
+            {"member_name": name, "member_mission": f"{name} helps.", "display_name": name},
+            inviter,
+        )
+        assert status == 200, answer
+        return self.redeem(answer["invitation"])
+
+    def service(self, inviter: str, name: str) -> str:
+        status, answer = http(
+            "POST",
+            f"{self.base}/invitations/service",
+            {"service_name": name, "display_name": f"for {name}"},
+            inviter,
+        )
+        assert status == 200, answer
+        return self.redeem(answer["invitation"], member_self_image=f"I am {name}.")
+
+    def revoked(self, name: str) -> str:
+        token = self.member(name)
+        status, answer = http(
+            "DELETE",
+            f"{self.admin}/realms/household/teams/kitchen/members/{name}/token",
+            token=ADMIN_SECRET,
+        )
+        assert status == 200, answer
+        return token
 
 
 @pytest.fixture(scope="module")
@@ -228,11 +269,14 @@ def text_of(result: dict[str, Any]) -> str:
 
 @pytest.fixture
 def programs(instance: Instance) -> Iterator[Any]:
-    """Start programs for tokens; at the end, none of them has let its token out."""
-    started: list[tuple[Program, str]] = []
+    """Start programs, with a token or without; at the end, none has let its token out."""
+    started: list[tuple[Program, str | None]] = []
 
-    def start(token: str, **extra: str) -> Program:
-        program = Program({"A2A_MCP_ADDRESS": instance.base, "A2A_MCP_TOKEN": token, **extra})
+    def start(token: str | None, **extra: str) -> Program:
+        environment = {"A2A_MCP_ADDRESS": instance.base, **extra}
+        if token is not None:
+            environment["A2A_MCP_TOKEN"] = token
+        program = Program(environment)
         started.append((program, token))
         return program
 
@@ -240,37 +284,90 @@ def programs(instance: Instance) -> Iterator[Any]:
     for program, token in started:
         stdout, stderr = program.close()
         assert program.process.returncode == 0, stderr
-        assert token not in stdout, "the token left the program on standard output"
-        assert token not in stderr, "the token left the program on standard error"
+        if token is not None:
+            assert token not in stdout, "the token left the program on standard output"
+            assert token not in stderr, "the token left the program on standard error"
 
 
 # ------------------------------------------------------------------ the checks
 
 
-def test_the_tools_are_exactly_the_operations_that_take_a_token(
-    instance: Instance, programs: Any
-) -> None:
-    """Both directions, no exception list: every operation a tool, every tool an operation."""
-    _, document = http("GET", f"{instance.base}/openapi.json")
-    expected = {}
+#: The addresses that describe the service rather than use it — named one by one,
+#: not derived. Deriving them with the rule the program itself uses would only show
+#: that two copies of one rule agree, and could never find an operation the rule
+#: leaves out by mistake. `/openapi.json` is named although the framework does not
+#: list it: if it ever did, it would still not be an operation.
+SELF_DESCRIPTION = {
+    ("GET", "/"),
+    ("GET", "/guide"),
+    ("GET", "/guide/{part}"),
+    ("GET", "/openapi.json"),
+    ("GET", "/skill.zip"),
+    ("GET", "/mcp.zip"),
+    ("GET", "/health"),
+    ("GET", "/build"),
+}
+
+
+def operations(document: dict[str, Any]) -> dict[str, str]:
+    """Every operation of the description but the self-description: name to address."""
+    found = {}
     for path, verbs in document["paths"].items():
         for verb, operation in verbs.items():
-            if any(
-                p["in"] == "header" and p["name"].lower() == "authorization"
-                for p in operation.get("parameters", [])
-            ):
-                expected[operation["operationId"]] = f"`{verb.upper()} {path}`"
+            if (verb.upper(), path) not in SELF_DESCRIPTION:
+                found[operation["operationId"]] = f"`{verb.upper()} {path}`"
+    return found
+
+
+def mismatch(expected: dict[str, str], tools: list[dict[str, Any]]) -> tuple[set, set, set]:
+    """Operations without a tool, tools without an operation, tools naming another address."""
+    names = {tool["name"] for tool in tools}
+    wrong = {
+        tool["name"]
+        for tool in tools
+        if tool["name"] in expected and expected[tool["name"]] not in tool["description"]
+    }
+    return set(expected) - names, names - set(expected), wrong
+
+
+def test_the_tools_are_exactly_the_operations(instance: Instance, programs: Any) -> None:
+    """Both directions, and nothing left out but the self-description named above."""
+    _, document = http("GET", f"{instance.base}/openapi.json")
+    described = {
+        (verb.upper(), path) for path, verbs in document["paths"].items() for verb in verbs
+    }
+    assert SELF_DESCRIPTION - {("GET", "/openapi.json")} <= described, "a named address moved"
+    expected = operations(document)
     anna = programs(instance.anna)
     anna.initialize()
 
     tools = anna.ask("tools/list")["result"]["tools"]
 
-    assert {tool["name"] for tool in tools} == set(expected)
+    assert mismatch(expected, tools) == (set(), set(), set())
     for tool in tools:
-        assert expected[tool["name"]] in tool["description"], tool["name"]
         assert tool["inputSchema"]["type"] == "object"
         assert "$ref" not in json.dumps(tool["inputSchema"]), "a schema has to stand alone"
-    assert len(tools) == 27
+    assert len(tools) == 28
+    assert "redeem" in expected, "redeeming is an operation, and so a tool"
+
+
+def test_the_comparison_finds_a_missing_an_extra_and_a_misplaced_tool(instance: Instance) -> None:
+    """The red probe: the comparison above is shown failing on each kind of drift."""
+    _, document = http("GET", f"{instance.base}/openapi.json")
+    expected = operations(document)
+    exact = [{"name": name, "description": where} for name, where in expected.items()]
+
+    one_short = [tool for tool in exact if tool["name"] != "redeem"]
+    one_over = [*exact, {"name": "invented", "description": "`GET /invented`"}]
+    misplaced = [
+        {**tool, "description": "`GET /elsewhere`"} if tool["name"] == "inbox" else tool
+        for tool in exact
+    ]
+
+    assert mismatch(expected, exact) == (set(), set(), set())
+    assert mismatch(expected, one_short)[0] == {"redeem"}
+    assert mismatch(expected, one_over)[1] == {"invented"}
+    assert mismatch(expected, misplaced)[2] == {"inbox"}
 
 
 def test_the_handshake_says_first_that_it_is_not_the_contract(
@@ -307,7 +404,7 @@ def test_the_current_revision_is_spoken_per_request(instance: Instance, programs
     assert found["instructions"].startswith("This MCP server is not the contract.")
     assert found["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "simple-a2a-mcp"
     assert listed["resultType"] == "complete" and listed["ttlMs"] > 0
-    assert len(listed["tools"]) == 27
+    assert len(listed["tools"]) == 28
 
 
 def test_what_does_not_fit_the_protocol_is_answered_as_the_protocol_says(
@@ -325,6 +422,18 @@ def test_what_does_not_fit_the_protocol_is_answered_as_the_protocol_says(
     assert MODERN in old_unknown["error"]["data"]["supported"]
     assert no_method["error"]["code"] == -32601
     assert no_tool["error"]["code"] == -32602
+
+
+def test_ping_belongs_to_the_handshake_revisions_only(instance: Instance, programs: Any) -> None:
+    """Revision 2026-07-28 removed it; asked in that revision, it does not exist."""
+    anna = programs(instance.anna)
+
+    modern = anna.ask("ping", {"_meta": META})
+    anna.initialize()
+    legacy = anna.ask("ping")
+
+    assert modern["error"]["code"] == -32601
+    assert legacy["result"] == {}
 
 
 META_KEY = "io.modelcontextprotocol/protocolVersion"
@@ -361,33 +470,110 @@ def test_a_message_goes_there_and_the_answer_comes_back(instance: Instance, prog
     assert text_of(anna.call("message_body", message_id=answered["message_id"])) == "Two packets."
 
 
-def test_a_refusal_comes_through_unchanged(instance: Instance, programs: Any) -> None:
-    """Status, type and teaching text, exactly as the service sent them."""
-    status, direct = http("GET", f"{instance.base}/peers/Nobody", token=instance.anna)
-    anna = programs(instance.anna)
-    anna.initialize()
+UNKNOWN_ID = "A" * 43
 
-    result = anna.call("one_peer", name="Nobody")
+#: A provocation: the token to start the program with, the tool and its arguments,
+#: and the same request made directly — verb, path, body (bytes for a raw one) and
+#: token.
+Case = tuple[str | None, str, dict[str, Any], tuple[str, str, Any, str | None]]
 
-    assert status != 200
+
+def no_token(i: Instance) -> Case:
+    return None, "inbox", {}, ("GET", "/inbox", None, None)
+
+
+def token_revoked(i: Instance) -> Case:
+    token = i.revoked("Carla")
+    return token, "inbox", {}, ("GET", "/inbox", None, token)
+
+
+def wrong_token(i: Instance) -> Case:
+    token = i.service(i.anna, "weather")
+    return token, "own_team", {}, ("GET", "/team", None, token)
+
+
+def not_realm_master(i: Instance) -> Case:
+    token = i.invited_by(i.anna, "Dora")
+    asked = {"service_name": "radio", "display_name": "for radio"}
+    return token, "invite_service", asked, ("POST", "/invitations/service", asked, token)
+
+
+def unknown_name(i: Instance) -> Case:
+    return i.anna, "one_peer", {"name": "Nobody"}, ("GET", "/peers/Nobody", None, i.anna)
+
+
+def unknown_identifier(i: Instance) -> Case:
+    asked = {"message_id": UNKNOWN_ID}
+    return i.anna, "envelope", asked, ("GET", f"/messages/{UNKNOWN_ID}", None, i.anna)
+
+
+def name_taken(i: Instance) -> Case:
+    asked = {"member_name": "Berta", "member_mission": "Again.", "display_name": "Berta again"}
+    return i.anna, "invite_peer", asked, ("POST", "/invitations/peer", asked, i.anna)
+
+
+def too_large(i: Instance) -> Case:
+    text = "x" * 9000
+    return i.anna, "set_my_self_image", {"text": text}, ("PUT", "/me/self", text.encode(), i.anna)
+
+
+def invalid_input(i: Instance) -> Case:
+    asked = {"subject": "x", "body": "y", "size": 3}
+    return i.anna, "send_to_peers", asked, ("POST", "/peers/messages", asked, i.anna)
+
+
+def invitation_used(i: Instance) -> Case:
+    voucher = i.invitation("Erik")
+    i.redeem(voucher)
+    asked = {"invitation": voucher}
+    return None, "redeem", asked, ("POST", "/invitations/redeem", asked, None)
+
+
+def unknown_address(i: Instance) -> Case:
+    asked = {"file_id": UNKNOWN_ID, "file_name": "a/b.txt"}
+    return i.anna, "fetch", asked, ("GET", f"/files/{UNKNOWN_ID}/a%2Fb.txt", None, i.anna)
+
+
+#: Every rejection type of the catalogue that a tool can meet on this surface. Two
+#: are not here, and cannot be: `falsches-verb` — every tool calls its operation
+#: with the verb the description gives it, so no tool can send another — and
+#: `innerer-fehler`, which needs the service itself to break, and no call from
+#: outside can arrange that. `unbekannte-adresse` *is* here: a file name with a
+#: slash in it reaches the router as two path segments and matches no address.
+REFUSALS = {
+    "kein-token": no_token,
+    "token-entzogen": token_revoked,
+    "falsches-token": wrong_token,
+    "kein-realmmaster": not_realm_master,
+    "unbekannter-name": unknown_name,
+    "unbekannte-kennung": unknown_identifier,
+    "name-vergeben": name_taken,
+    "zu-groß": too_large,
+    "ungültige-eingabe": invalid_input,
+    "einladung-verbraucht": invitation_used,
+    "unbekannte-adresse": unknown_address,
+}
+
+
+@pytest.mark.parametrize("kind", sorted(REFUSALS))
+def test_every_refusal_comes_through_unchanged(
+    kind: str, instance: Instance, programs: Any
+) -> None:
+    """Status, type and teaching text, exactly as the service sends them directly."""
+    token, tool, arguments, (verb, path, body, direct_token) = REFUSALS[kind](instance)
+    program = programs(token)
+    program.initialize()
+
+    result = program.call(tool, **arguments)
+    raw = body if isinstance(body, bytes) else None
+    status, direct = http(verb, f"{instance.base}{path}", None if raw else body, direct_token, raw)
+
+    assert direct["type"] == kind, direct
     assert result["isError"] is True
     said = text_of(result)
     assert f"status: {status}" in said
     assert f"type: {direct['type']}" in said
     assert direct["message"] in said
-
-
-def test_a_malformed_body_is_refused_by_the_service_in_its_own_words(
-    instance: Instance, programs: Any
-) -> None:
-    """An argument the tool does not know goes to the service, whose text is better."""
-    anna = programs(instance.anna)
-    anna.initialize()
-
-    result = anna.call("send_to_peers", subject="x", body="y", size=3)
-
-    assert result["isError"] is True
-    assert "type: " in text_of(result)
 
 
 def test_a_file_goes_up_from_a_path_and_comes_down_to_one(
@@ -509,17 +695,8 @@ def test_nothing_but_protocol_goes_to_standard_output(instance: Instance, progra
 # ------------------------------------------------------------------ refusing to start
 
 
-@pytest.mark.parametrize(
-    ("given", "named"),
-    [
-        ({"A2A_MCP_TOKEN": "t"}, ["A2A_MCP_ADDRESS"]),
-        ({"A2A_MCP_ADDRESS": "http://127.0.0.1:1"}, ["A2A_MCP_TOKEN"]),
-        ({}, ["A2A_MCP_ADDRESS", "A2A_MCP_TOKEN"]),
-    ],
-)
-def test_without_its_pair_it_does_not_start_and_says_what_is_missing(
-    given: dict[str, str], named: list[str]
-) -> None:
+@pytest.mark.parametrize("given", [{"A2A_MCP_TOKEN": "t"}, {}])
+def test_without_an_address_it_does_not_start_and_says_so(given: dict[str, str]) -> None:
     started = subprocess.run(
         [sys.executable, str(PROGRAM)],
         env={"PATH": os.environ.get("PATH", ""), **given},
@@ -531,8 +708,154 @@ def test_without_its_pair_it_does_not_start_and_says_what_is_missing(
 
     assert started.returncode == 2
     assert started.stdout == b"", "standard output is the protocol's"
-    for variable in named:
-        assert variable in started.stderr.decode()
+    assert "A2A_MCP_ADDRESS" in started.stderr.decode()
+
+
+def test_with_only_an_invitation_it_starts_and_redeeming_works(
+    instance: Instance, programs: Any
+) -> None:
+    """The way an agent handed an invitation begins: start without a token, redeem.
+
+    The new token is in the redeem result, once — the one moment it exists — and
+    the second instance, started with it, works as that identity.
+    """
+    voucher = instance.invitation("Fiona")
+    bare = programs(None)
+
+    said = bare.initialize()["result"]["instructions"]
+    redeemed = bare.call("redeem", invitation=voucher)
+    token = json.loads(text_of(redeemed))["token"]
+    refused = bare.call("inbox")
+    second = programs(token)
+    second.initialize()
+    me = second.call("me")
+
+    assert said.startswith("This MCP server is not the contract.")
+    assert "started without a token" in said and "`redeem`" in said
+    assert "A2A_MCP_TOKEN" in said
+    assert redeemed["isError"] is False
+    assert "".join(bare.lines).count(token) == 1, "the new token appears exactly once"
+    assert refused["isError"] is True and "type: kein-token" in text_of(refused)
+    assert me["isError"] is False and "Fiona" in text_of(me)
+
+
+def test_without_a_token_a_subscription_is_refused_in_the_service_words(
+    instance: Instance, programs: Any
+) -> None:
+    """Not a subscription that never hears anything: the refusal, as the service gave it."""
+    bare = programs(None)
+    bare.initialize()
+
+    subscribed = bare.ask("resources/subscribe", {"uri": "simple-a2a://inbox"})
+    listened = bare.ask(
+        "subscriptions/listen",
+        {"_meta": META, "notifications": {"resourceSubscriptions": ["simple-a2a://inbox"]}},
+    )
+
+    for answer in (subscribed, listened):
+        assert answer["error"]["data"]["type"] == "kein-token"
+        assert "type: kein-token" in answer["error"]["message"]
+
+
+def test_an_open_stream_is_closed_with_its_result_when_the_input_ends(
+    instance: Instance, programs: Any
+) -> None:
+    """An orderly end the client can tell from a dropped connection."""
+    berta = programs(instance.berta)
+    berta.send(
+        {
+            "jsonrpc": "2.0",
+            "id": "stream",
+            "method": "subscriptions/listen",
+            "params": {
+                "_meta": META,
+                "notifications": {"resourceSubscriptions": ["simple-a2a://inbox"]},
+            },
+        }
+    )
+    berta.wait(lambda m: m.get("method") == "notifications/subscriptions/acknowledged")
+
+    stdout, _ = berta.close()
+
+    closing = [json.loads(line) for line in stdout.splitlines()][-1]
+    assert closing["id"] == "stream"
+    assert closing["result"]["resultType"] == "complete"
+    assert closing["result"]["_meta"]["io.modelcontextprotocol/subscriptionId"] == "stream"
+
+
+def test_a_redirect_is_never_followed(tmp_path: Path) -> None:
+    """A redirect would carry the token to whatever address it names; it is answered, not taken.
+
+    Two small servers: one that describes an inbox and redirects every call to it,
+    and one at the redirect's target that records whoever arrives.
+    """
+    import http.server
+
+    token = "a-token-that-must-stay-home"
+    arrived: list[dict[str, str]] = []
+
+    class Target(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            arrived.append(dict(self.headers))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    target = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Target)
+    elsewhere = f"http://127.0.0.1:{target.server_address[1]}/inbox"
+    described = {
+        "paths": {
+            "/inbox": {
+                "get": {
+                    "operationId": "inbox",
+                    "summary": "The inbox.",
+                    "parameters": [{"name": "authorization", "in": "header"}],
+                }
+            }
+        }
+    }
+
+    class Redirecting(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path == "/openapi.json":
+                body = json.dumps(described).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(302)
+            self.send_header("Location", elsewhere)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    source = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Redirecting)
+    for server in (target, source):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        program = Program(
+            {
+                "A2A_MCP_ADDRESS": f"http://127.0.0.1:{source.server_address[1]}",
+                "A2A_MCP_TOKEN": token,
+            }
+        )
+        program.initialize()
+        result = program.call("inbox")
+        stdout, stderr = program.close()
+    finally:
+        for server in (target, source):
+            server.shutdown()
+
+    assert result["isError"] is True
+    assert "302" in text_of(result)
+    assert arrived == [], "nothing reached the redirect's target, least of all the token"
+    assert token not in stdout and token not in stderr
 
 
 def test_arguments_are_refused_because_they_stand_in_the_process_list() -> None:
