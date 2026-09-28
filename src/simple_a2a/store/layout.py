@@ -93,6 +93,16 @@ ENVELOPE = "envelope.json"
 #: is what makes "is this name free" and "take it" a single step.
 BY_NAME = "by-name"
 
+#: What joins the two halves of a mailbox entry's name, and the whole point of it
+#: is that it occurs in **neither** half. A timestamp contains hyphens, colons and
+#: a dot; an identifier is base64url, so it can contain hyphens and underscores.
+#: A separator that appears in either one turns reading the name back into a
+#: guess — which is exactly the mistake that was made first, splitting at the last
+#: hyphen of a name whose identifier had hyphens of its own.
+#:
+#: A tilde is in neither alphabet, and it is unreserved in a path.
+ENTRY_SEPARATOR = "~"
+
 #: The two ways into the alias index: from the value a service replies to, and
 #: from the delivery it belongs to.
 BY_VALUE = "by-value"

@@ -9,13 +9,14 @@ Three properties carry the whole design, and each is checked here:
 
 from __future__ import annotations
 
+import string
 from pathlib import Path
 
 import pytest
 
 from simple_a2a.core.ids import new_id
 from simple_a2a.store.holdings import Holdings, NameTaken
-from simple_a2a.store.layout import Layout, State
+from simple_a2a.store.layout import ENTRY_SEPARATOR, Layout, State
 from simple_a2a.store.records import Alias, MailboxEntry, Message, Participant
 
 
@@ -389,17 +390,47 @@ def test_the_reported_delivery_time_is_the_one_the_ordering_uses(
     )
     # Moved in time the way anything here is moved: by renaming.
     entry = next(iter(mailbox.iterdir()))
-    entry.rename(mailbox / f"2026-01-01T00:00:00.000Z-{message_id}")
+    entry.rename(mailbox / f"2026-01-01T00:00:00.000Z{ENTRY_SEPARATOR}{message_id}")
 
     listed = holdings.mailbox_entries(mailbox)
 
     assert [e.delivered_at for e in listed] == ["2026-01-01T00:00:00.000Z"]
 
 
+def test_the_separator_occurs_in_neither_half_of_an_entry_name(
+    holdings: Holdings, realm, team
+) -> None:
+    """The property, not the split: a separator in either half makes reading a guess.
+
+    Timestamps carry hyphens, colons and a dot; identifiers are base64url and carry
+    hyphens and underscores. This asserts the character is in neither — which is
+    the thing that keeps the split exact, and the thing a later change could
+    quietly break.
+    """
+    assert ENTRY_SEPARATOR not in "0123456789-:.TZ"
+    assert ENTRY_SEPARATOR not in string.ascii_letters + string.digits + "-_"
+
+    awkward = "a-b_c" + "x" * 38
+    holdings.deliver(
+        holdings.layout.member_mailbox(realm.id, team.id, "somebody") / "inbox",
+        MailboxEntry(
+            message_id=awkward,
+            delivered_at="2026-09-27T12:00:00.000Z",
+            sender={"kind": "peer", "name": "Anna"},
+        ),
+    )
+    listed = holdings.mailbox_entries(
+        holdings.layout.member_mailbox(realm.id, team.id, "somebody") / "inbox"
+    )
+
+    assert listed[0].delivered_at == "2026-09-27T12:00:00.000Z"
+    assert listed[0].message_id == awkward
+
+
 def test_an_identifier_with_a_hyphen_does_not_confuse_the_split(
     holdings: Holdings, realm, team
 ) -> None:
-    """Identifiers contain hyphens, and so do timestamps; the separator is "Z-"."""
+    """Both halves carry hyphens of their own; the separator carries none."""
     member = holdings.create_member(
         realm.id, team.id, new_id(), "Otto", token=new_id(), mission="a"
     )

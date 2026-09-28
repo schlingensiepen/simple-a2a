@@ -33,7 +33,7 @@ from pathlib import Path
 
 from simple_a2a.core import atomic
 from simple_a2a.core.clock import now_iso
-from simple_a2a.store.layout import ENVELOPE, META, Layout, State
+from simple_a2a.store.layout import ENTRY_SEPARATOR, ENVELOPE, META, Layout, State
 from simple_a2a.store.records import (
     Alias,
     Invitation,
@@ -543,7 +543,7 @@ class Holdings:
         an index that cannot fall out of step with what it indexes. Equal
         timestamps have no order, which the specification says outright.
         """
-        return f"{entry.delivered_at}-{entry.message_id}"
+        return f"{entry.delivered_at}{ENTRY_SEPARATOR}{entry.message_id}"
 
     @staticmethod
     def _delivered_at_of(name: str) -> str | None:
@@ -554,11 +554,11 @@ class Holdings:
         of one fact, and a listing could then hand back an entry dated later than
         the one above it.
         """
-        # Split on the first "Z-": a timestamp has hyphens of its own, and so can an
-        # identifier, but the timestamp's single "Z" is its last character — so the
-        # first "Z-" in the name is the separator and nothing else can be.
-        stamp, separator, _ = name.partition("Z-")
-        return f"{stamp}Z" if separator else None
+        # The separator occurs in neither half, so the split is exact rather than
+        # clever. It was clever once — the last hyphen of the name — and an
+        # identifier with hyphens of its own broke it.
+        stamp, separator, _ = name.partition(ENTRY_SEPARATOR)
+        return stamp if separator else None
 
     def deliver(self, mailbox: Path, entry: MailboxEntry) -> None:
         self._put(mailbox / self._entry_name(entry), entry, as_file=ENVELOPE)

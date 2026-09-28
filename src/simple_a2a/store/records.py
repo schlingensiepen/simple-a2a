@@ -246,6 +246,9 @@ class MailboxEntry(Record):
     that the name can be built from one place — not so that it can be stored
     twice: two copies of one fact eventually disagree, and then a listing hands
     back an entry dated later than the one above it.
+
+    The two halves of that name are joined by a character that occurs in neither
+    of them, so reading it back is a split and not a guess.
     """
 
     message_id: str
