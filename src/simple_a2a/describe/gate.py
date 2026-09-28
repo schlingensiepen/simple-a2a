@@ -111,7 +111,13 @@ def _check_schemas(operation: dict[str, Any], where: str) -> list[str]:
     for parameter in operation.get("parameters") or []:
         if not _described(parameter.get("description")):
             problems.append(f"{where}: parameter {parameter.get('name')!r} has no description")
-        if "example" not in parameter and "example" not in (parameter.get("schema") or {}):
+        schema = parameter.get("schema") or {}
+        if not any(
+            key in place for place in (parameter, schema) for key in ("example", "examples")
+        ):
+            # Both spellings count: OpenAPI 3.1 has `examples` as a list on a schema
+            # and `example` as a single value, and pydantic writes whichever it
+            # writes. What matters is that there is one, not where it sits.
             problems.append(f"{where}: parameter {parameter.get('name')!r} has no example")
     body = ((operation.get("requestBody") or {}).get("content") or {}).get("application/json") or {}
     if body:

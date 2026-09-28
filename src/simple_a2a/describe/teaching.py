@@ -91,7 +91,13 @@ class Register:
 #: The types every operation behind a token can produce, whatever else it does.
 #: Listed once rather than repeated per operation, because repeating them is how
 #: one of them goes missing somewhere.
-BEHIND_A_TOKEN = {Type.NO_TOKEN, Type.TOKEN_REVOKED, Type.INTERNAL}
+#:
+#: `falsches-token` is in here for every surface, including the administration:
+#: a participant who presents their own token there is valid and of the wrong
+#: kind, and that is a different answer from an unknown one. So is
+#: `token-entzogen`, because a revoked participant token can be presented
+#: anywhere.
+BEHIND_A_TOKEN = {Type.NO_TOKEN, Type.TOKEN_REVOKED, Type.WRONG_TOKEN, Type.INTERNAL}
 
 #: And the two that belong to the address rather than to the operation. They are
 #: answered before any operation is reached, so they are registered against the

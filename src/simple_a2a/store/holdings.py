@@ -51,7 +51,17 @@ from pathlib import Path
 
 from simple_a2a.core import atomic
 from simple_a2a.core.clock import now_iso
-from simple_a2a.store.layout import ENTRY_SEPARATOR, ENVELOPE, META, Layout, State
+from simple_a2a.store.layout import (
+    BY_DELIVERY,
+    BY_NAME,
+    BY_VALUE,
+    ENTRY_SEPARATOR,
+    ENVELOPE,
+    MAILBOXES,
+    META,
+    Layout,
+    State,
+)
 from simple_a2a.store.records import (
     Alias,
     Invitation,
@@ -76,6 +86,14 @@ PURPOSE = "purpose"
 SUBJECT = "subject"
 BODY = "body"
 CONTENT = "content"
+
+
+#: Directory names that are bookkeeping rather than a thing: the name indexes, the
+#: alias indexes, the mailbox root and the state directories. They sit beside what
+#: they are about, so every listing has to know they are not one of it.
+NOT_A_THING = frozenset(
+    {BY_NAME, BY_VALUE, BY_DELIVERY, MAILBOXES, *(str(state) for state in State)}
+)
 
 
 class NameTaken(Exception):
@@ -170,9 +188,18 @@ class Holdings:
 
     @staticmethod
     def _ids_in(directory: Path) -> list[str]:
+        """The things in a directory, and not the bookkeeping beside them.
+
+        An index and a state live in the same parent as the things they are about —
+        `by-name` next to the realms, `mailboxes` next to the members — so a plain
+        listing counts them as things. It reported a realm with one team as having
+        two, and every count in every listing was wrong by the number of indexes.
+        """
         if not directory.is_dir():
             return []
-        return sorted(p.name for p in directory.iterdir() if p.is_dir())
+        return sorted(
+            p.name for p in directory.iterdir() if p.is_dir() and p.name not in NOT_A_THING
+        )
 
     # ----------------------------------------------------------------- realms
 

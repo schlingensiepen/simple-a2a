@@ -611,3 +611,149 @@ def write_note(context: Context, text: object, realm_id: str | None = None) -> i
     else:
         context.holdings.set_realm_note(realm_id, body)
     return len(body)
+
+
+# --------------------------------------------------------------- the listings
+
+#: The window over a listing. Asking for more is refused and told the limit;
+#: shortening quietly would tell a caller they had reached the end of a list.
+
+
+@dataclass(frozen=True)
+class Window:
+    offset: int
+    limit: int
+
+    @staticmethod
+    def of(offset: object, limit: object) -> Window:
+        made = Window(
+            offset=_whole_number(offset, "offset", limits.WINDOW_OFFSET_DEFAULT),
+            limit=_whole_number(limit, "limit", limits.WINDOW_LIMIT_DEFAULT),
+        )
+        if made.limit > limits.WINDOW_LIMIT_MAX:
+            raise refusals.TooLarge(
+                "limit", limit=limits.WINDOW_LIMIT_MAX, actual=made.limit, unit="entries"
+            )
+        return made
+
+    def over[T](self, items: list[T]) -> list[T]:
+        return items[self.offset : self.offset + self.limit]
+
+
+def _whole_number(value: object, field: str, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        number = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise refusals.InvalidInput(field, reason="a whole number") from None
+    if number < 0:
+        raise refusals.InvalidInput(field, reason="not negative")
+    return number
+
+
+def realms(context: Context, window: Window) -> list[dict[str, object]]:
+    """Every realm, with how much is in it. Verwaltungs-Zustand, no content."""
+    found = []
+    for realm_id in context.holdings.realm_ids():
+        record = context.holdings.realm(realm_id)
+        if record is None:
+            continue
+        found.append(
+            {
+                "realm_name": record.name,
+                "team_count": len(context.holdings.team_ids(realm_id)),
+                "service_count": sum(1 for _ in context.holdings.services(realm_id)),
+            }
+        )
+    found.sort(key=lambda entry: str(entry["realm_name"]).casefold())
+    return window.over(found)
+
+
+def teams(context: Context, realm_id: str, window: Window) -> list[dict[str, object]]:
+    found = []
+    for team_id in context.holdings.team_ids(realm_id):
+        record = context.holdings.team(realm_id, team_id)
+        if record is None:
+            continue
+        found.append(
+            {
+                "team_name": record.name,
+                "member_count": sum(1 for _ in context.holdings.members(realm_id, team_id)),
+            }
+        )
+    found.sort(key=lambda entry: str(entry["team_name"]).casefold())
+    return window.over(found)
+
+
+def members(
+    context: Context, realm_id: str, team_id: str, window: Window
+) -> list[dict[str, object]]:
+    """Management state and no content: who is there, who may appoint, whose token is gone."""
+    found = [
+        {
+            "member_name": located.record.name,
+            "is_realm_master": located.record.is_realm_master,
+            "token_revoked": located.state is State.REVOKED,
+        }
+        for located in context.holdings.members(realm_id, team_id)
+    ]
+    found.sort(key=lambda entry: str(entry["member_name"]).casefold())
+    return window.over(found)
+
+
+def services(context: Context, realm_id: str, window: Window) -> list[dict[str, object]]:
+    found = [
+        {
+            "service_name": located.record.name,
+            "token_revoked": located.state is State.REVOKED,
+        }
+        for located in context.holdings.services(realm_id)
+    ]
+    found.sort(key=lambda entry: str(entry["service_name"]).casefold())
+    return window.over(found)
+
+
+def observers(context: Context, realm_id: str, window: Window) -> list[dict[str, object]]:
+    found = [
+        {
+            "display_name": located.record.display_name,
+            "issued_at": located.record.created_at,
+            "token_revoked": located.state is State.REVOKED,
+        }
+        for located in context.holdings.observers(realm_id)
+    ]
+    found.sort(key=lambda entry: str(entry["display_name"]).casefold())
+    return window.over(found)
+
+
+def invitations(context: Context, realm_id: str, window: Window) -> list[dict[str, object]]:
+    """Every invitation, used up and revoked ones included.
+
+    Nothing is deleted, a display name stays taken, and a repeated revocation needs
+    the entry — which is why this is "list invitations" and not "list open ones".
+    `issued_by` is named so that the operator can find the invitations of somebody
+    whose token they have just revoked: those stay redeemable and have to be
+    revoked one by one.
+    """
+    found = []
+    for located in context.holdings.invitations(realm_id):
+        record = located.record
+        team = context.holdings.team(realm_id, record.team_id) if record.team_id else None
+        entry: dict[str, object] = {
+            "display_name": record.display_name,
+            "kind": record.kind,
+            "team_name": team.name if team else None,
+            "target_name": record.invited_name,
+            "issued_at": record.created_at,
+            "issued_by_kind": record.issued_by_kind,
+            "redeemed_at": record.consumed_at,
+            "revoked": record.revoked_at is not None,
+        }
+        # Named only where it means somebody: an invitation the operator obtained
+        # was obtained by the installation, not by a person in a team.
+        if record.issued_by_kind == Kind.MEMBER:
+            entry["issued_by"] = record.issued_by_name
+        found.append(entry)
+    found.sort(key=lambda entry: str(entry["display_name"]).casefold())
+    return window.over(found)

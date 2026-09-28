@@ -108,6 +108,10 @@ ENTRY_SEPARATOR = "~"
 BY_VALUE = "by-value"
 BY_DELIVERY = "by-delivery"
 
+#: Where the mailboxes of a team or a registry sit. Named here because it shares a
+#: parent with the things it belongs to, so every listing has to know it is not one.
+MAILBOXES = "mailboxes"
+
 
 class State(StrEnum):
     """The directory a thing sits in, which is what its state means."""
@@ -266,10 +270,10 @@ class Layout:
     # -- mailboxes ---------------------------------------------------------
 
     def team_mailboxes(self, realm_id: str, team_id: str) -> Path:
-        return self.team(realm_id, team_id) / "mailboxes"
+        return self.team(realm_id, team_id) / MAILBOXES
 
     def member_mailbox(self, realm_id: str, team_id: str, member_id: str) -> Path:
         return self.team_mailboxes(realm_id, team_id) / member_id
 
     def service_mailbox(self, realm_id: str, service_id: str) -> Path:
-        return self.services(realm_id) / "mailboxes" / service_id
+        return self.services(realm_id) / MAILBOXES / service_id
