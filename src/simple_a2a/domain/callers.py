@@ -20,8 +20,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from simple_a2a.store.layout import State
-
 
 class Role(StrEnum):
     OPERATOR = "operator"
@@ -65,7 +63,6 @@ class Service:
     realm_id: str
     service_id: str
     name: str
-    state: State = State.ACTIVE
     role: Role = Role.SERVICE
 
 

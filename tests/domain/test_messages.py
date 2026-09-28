@@ -260,7 +260,14 @@ def test_a_service_answers_by_sending_to_the_alias(
         context, wetter.caller, alias=alias, subject="Antwort", body="Zwölf Grad."
     )
 
-    assert answer.recipients[0].name == "Anna"
+    # The service is shown the alias it answered, never the person — in this
+    # response and in its own outbox. A name here would break the promise at the
+    # first follow-up step.
+    assert [(p.kind, p.name) for p in answer.recipients] == [("alias", alias)]
+    outbox = messages.list_mailbox(context, wetter.caller, OUTBOX, offset=0, limit=25)
+    assert outbox[0].recipients == [{"kind": "alias", "name": alias}]
+    assert messages.envelope(context, wetter.caller, answer.message_id).recipients[0].name == alias
+
     inbox = messages.list_mailbox(context, world.anna.caller, INBOX, offset=0, limit=25)
     assert inbox[0].sender == {"kind": "service", "name": "Wetter"}
     # The reference back is set by the service itself, to the message the alias
@@ -423,18 +430,48 @@ def test_the_names_of_one_list_are_unique(context: Context, world: World) -> Non
     assert "twice" in raised.value.reason
 
 
-@pytest.mark.parametrize(
-    "name", ["with/slash", "with\\slash", "line\nbreak", "tab\there", ".", ".."]
-)
-def test_an_attachment_name_is_not_a_path(context: Context, world: World, name: str) -> None:
-    """It ends up in a response header and in a fetch path, so it is refused
-    rather than resolved."""
+@pytest.mark.parametrize("name", ["line\nbreak", "tab\there", "nul\0byte", ".", "..", "dir/"])
+def test_an_attachment_name_that_is_no_name_is_refused(
+    context: Context, world: World, name: str
+) -> None:
+    """Control characters are a mistake the caller has to see, so they are refused.
+
+    So is anything of which no name is left once the path is dropped.
+    """
     file_id, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
 
     with pytest.raises(refusals.InvalidInput) as raised:
         send(context, world.anna.caller, attachments=[{"name": name, "file_id": file_id}])
 
     assert raised.value.field == "attachments.name"
+
+
+@pytest.mark.parametrize(
+    ("given", "kept"),
+    [
+        ("reports/2026/zahlen.csv", "zahlen.csv"),
+        ("../../etc/passwd", "passwd"),
+        ("C:\\Users\\jemand\\brief.txt", "brief.txt"),
+        ("/absolut/pfad.md", "pfad.md"),
+        ("schlicht.txt", "schlicht.txt"),
+    ],
+)
+def test_a_directory_part_is_dropped_rather_than_resolved(
+    context: Context, world: World, given: str, kept: str
+) -> None:
+    """Two treatments, and the specification names them with two different verbs.
+
+    Control characters are *refused*; directory parts are *discarded* rather than
+    resolved. So a caller who attaches what their own filesystem calls the file
+    gets a usable attachment instead of a rejection, and nothing that looks like a
+    path reaches a response header or a fetch address.
+    """
+    file_id, _ = messages.deposit_file(context, world.anna.caller, b"inhalt")
+
+    sent = send(context, world.anna.caller, attachments=[{"name": given, "file_id": file_id}])
+
+    seen = messages.envelope(context, world.berta.caller, sent.message_id)
+    assert [entry["name"] for entry in seen.attachments] == [kept]
 
 
 def test_more_than_sixty_four_entries_are_too_large(context: Context, world: World) -> None:

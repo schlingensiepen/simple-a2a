@@ -11,6 +11,24 @@ none of them needs a lock:
   filesystem lets exactly one of them win.
 - **move** — change a thing's state by renaming its directory.
 
+**Each of the four is atomic; a sequence of them is not.** There is no journal
+here, so where an operation needs two, the order is chosen for the wreck an
+interruption leaves — and the choice is written down at each of them rather than
+left to be rediscovered:
+
+- **claim, then write the record.** Interrupted in between, the name is taken for
+  good and no listing shows it. The other way round, two callers racing for one
+  name would both leave a *visible* record, and a team would show two members with
+  the same name — which is the one thing the claim exists to prevent. So the
+  burnt name is the lesser wreck, and `member_name_taken` asks the **claim** rather
+  than the records, so that the collision is reported at the earliest point
+  instead of to the invited person.
+- **write the alias by value, then index it by delivery.** Interrupted in between,
+  the alias exists and is not found by its delivery, so delivering the same message
+  again would mint a second one. Harmless in practice — nothing points at the first
+  — and the other order would hand a service an alias whose record is missing,
+  which it could not reply to.
+
 Raw texts are stored as their own files rather than inside the JSON. Whatever a
 participant delivered comes back out byte for byte under its own address, and a
 round trip through JSON is not byte for byte — it normalises, it re-encodes, and
@@ -240,6 +258,20 @@ class Holdings:
         """By name, in whatever state — a revoked member stays visible and readable."""
         member_id = self._claimed(self.layout.member_by_name(realm_id, team_id, name))
         return self.member(realm_id, team_id, member_id) if member_id else None
+
+    def member_name_taken(self, realm_id: str, team_id: str, name: str) -> bool:
+        """Whether this name is claimed — which is not the same as "somebody has it".
+
+        The claim is the authority, because the claim is what a later attempt will
+        collide with. Asking whether a *record* exists answers a different question
+        and gets it wrong in one case: a claim whose record never made it. Checked
+        the other way, an invitation would be issued for a name that cannot be
+        redeemed, and the person who finds out is the invited one.
+        """
+        return self._claimed(self.layout.member_by_name(realm_id, team_id, name)) is not None
+
+    def service_name_taken(self, realm_id: str, name: str) -> bool:
+        return self._claimed(self.layout.service_by_name(realm_id, name)) is not None
 
     def member_ids(self, realm_id: str, team_id: str, state: State) -> list[str]:
         return self._ids_in(self.layout.members(realm_id, team_id) / state)

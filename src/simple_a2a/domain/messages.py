@@ -177,12 +177,21 @@ def check_attachments(context: Context, realm_id: str, raw: object) -> tuple[lis
                 actual=len(name),
                 unit="characters",
             )
-        # A name is not a path. Control characters, line breaks and directory
-        # parts are refused rather than resolved: a file attachment's name ends up
-        # in a response header and in a fetch path.
-        if any(ch in name for ch in "\r\n\t\0/\\") or name in (".", ".."):
+        # A name is not a path, and the two halves of that are treated differently
+        # on purpose. Control characters and line breaks are **refused** with a
+        # teaching text — they are a mistake the caller has to see. Directory parts
+        # are **discarded** rather than resolved: `reports/2026/x.txt` becomes
+        # `x.txt`. A file attachment's name ends up in a response header and in a
+        # fetch path, so what remains has to be a plain name; what remains of
+        # nothing, or of `.` and `..`, is not one.
+        if any(ch in name for ch in "\r\n\t\0"):
             raise refusals.InvalidInput(
-                "attachments.name", reason="not a path, no control characters"
+                "attachments.name", reason="no control characters and no line breaks"
+            )
+        name = name.replace("\\", "/").rsplit("/", 1)[-1]
+        if not name or name in (".", ".."):
+            raise refusals.InvalidInput(
+                "attachments.name", reason="nothing is left of it once the path is dropped"
             )
         key = comparison_key(name)
         if key in seen:
@@ -278,6 +287,7 @@ def _store_and_deliver(
     team_id: str,
     sender: Participant,
     recipients: list[Participant],
+    shown_recipients: list[Participant] | None = None,
     subject: str,
     body: str,
     attachments: list[dict],
@@ -291,6 +301,11 @@ def _store_and_deliver(
     crash in between leaves an entry nobody can reach rather than a pointer to
     nothing.
     """
+    # What the sender is shown, and what goes into their outbox entry. The same as
+    # the true recipients everywhere except one place: a service answering an alias
+    # is shown the alias, because its own outbox must not name the person it
+    # answered.
+    shown = recipients if shown_recipients is None else shown_recipients
     body_size = len(body.encode("utf-8"))
     message = Message(
         id=new_id(),
@@ -305,17 +320,29 @@ def _store_and_deliver(
     )
     context.holdings.put_message(realm_id, message, subject=subject, body=body)
 
+    # The sender's own copy comes first, so that a crash in the middle of the
+    # deliveries still leaves the sender able to see what they attempted. Their own
+    # message is not in their inbox — that is what the outbox is for — and it
+    # exists because an agent loses its context between two instructions and could
+    # otherwise not read back what it said itself.
+    #
+    # The residual is named rather than prevented: there is no journal here, so a
+    # crash between two deliveries leaves a message that some recipients got. The
+    # sender sees no answer and sends again, which is what fire-and-forget means,
+    # and duplicates are deliberately not detected.
+    _deliver(
+        context,
+        _mailbox_for(context, realm_id, team_id, sender, OUTBOX),
+        message,
+        sender,
+        shown,
+    )
     for recipient in recipients:
         _deliver_to(context, realm_id, team_id, message, recipient)
-
-    # The sender's own copy. Their own message is not in their inbox — that is what
-    # the outbox is for — and it exists because an agent loses its context between
-    # two instructions and could otherwise not read back what it said itself.
-    _deliver(context, _mailbox_for(context, realm_id, team_id, sender, OUTBOX), message, sender)
     return Sent(
         message_id=message.id,
         sent_at=message.created_at,
-        recipients=recipients,
+        recipients=shown,
         warnings=warnings,
     )
 
@@ -336,7 +363,18 @@ def _mailbox_for(
     return None
 
 
-def _deliver(context: Context, mailbox: Path | None, message: Message, sender: Participant) -> None:
+def _deliver(
+    context: Context,
+    mailbox: Path | None,
+    message: Message,
+    sender: Participant,
+    recipients: list[Participant],
+) -> None:
+    """Put one entry into one mailbox, carrying the envelope as its owner sees it.
+
+    Both halves are the owner's view, not the true one: a service sees an alias
+    where a name would be, and it sees that alias in its own outbox too.
+    """
     if mailbox is None:
         return
     context.holdings.deliver(
@@ -345,6 +383,7 @@ def _deliver(context: Context, mailbox: Path | None, message: Message, sender: P
             message_id=message.id,
             delivered_at=now_iso(),
             sender={"kind": sender.kind, "name": sender.name},
+            recipients=[{"kind": p.kind, "name": p.name} for p in recipients],
         ),
     )
 
@@ -362,14 +401,22 @@ def _deliver_to(
         found = context.holdings.service_named(realm_id, recipient.name)
         if found is None:
             return
-        shown = Participant(
+        as_alias = Participant(
             kind="alias",
             name=_alias_for(context, realm_id, team_id, message, found.record.id, sender),
         )
         mailbox = context.holdings.layout.service_mailbox(realm_id, found.record.id) / INBOX
-        _deliver(context, mailbox, message, shown)
+        # The service is its own recipient, which it already knows; the alias goes
+        # where the sender's name would otherwise be.
+        _deliver(context, mailbox, message, as_alias, [recipient])
         return
-    _deliver(context, _mailbox_for(context, realm_id, team_id, recipient, INBOX), message, sender)
+    _deliver(
+        context,
+        _mailbox_for(context, realm_id, team_id, recipient, INBOX),
+        message,
+        sender,
+        [Participant(kind=r["kind"], name=r["name"]) for r in message.recipients],
+    )
 
 
 def _alias_for(
@@ -487,15 +534,18 @@ def send_to_alias(
         raise refusals.UnknownIdentifier("alias")
     text = resolve_body(context, sender.realm_id, body, body_file_id)
     entries, weight = check_attachments(context, sender.realm_id, attachments)
-    # The answer goes back as the service's *name*, with the kind `service`: the
-    # team member sees an ordinary message from a name they can address, and learns
-    # nothing of an alias.
+    # Two views, and both are needed. The **member** sees an ordinary message from a
+    # name they can address, so the delivery goes to the real person. The
+    # **service** must see the alias it answered — in the response to this call and
+    # in its own outbox — because a name there would break the promise at the first
+    # follow-up step.
     return _store_and_deliver(
         context,
         realm_id=sender.realm_id,
         team_id=found.team_id,
         sender=Participant(kind="service", name=sender.name),
         recipients=[Participant(kind=found.sender["kind"], name=found.sender["name"])],
+        shown_recipients=[Participant(kind="alias", name=alias)],
         subject=check_subject(subject),
         body=text,
         attachments=entries,
@@ -552,21 +602,23 @@ def envelope(context: Context, caller: Caller, message_id: str) -> Envelope:
         # about other people's holdings.
         raise refusals.UnknownIdentifier("message")
 
-    shown = Participant(kind=stored.sender["kind"], name=stored.sender["name"])
-    if isinstance(caller, Peer | Service):
-        for view in (INBOX, OUTBOX):
-            for entry in context.holdings.mailbox_entries(mailbox_of(context, caller, view)):
-                if entry.message_id == message_id:
-                    shown = Participant(kind=entry.sender["kind"], name=entry.sender["name"])
-                    break
-            else:
-                continue
-            break
+    shown_sender = Participant(kind=stored.sender["kind"], name=stored.sender["name"])
+    shown_recipients = [Participant(kind=r["kind"], name=r["name"]) for r in stored.recipients]
+    mine = _own_delivery(context, caller, message_id)
+    if mine is not None:
+        # Both halves come from the delivery, not just the sender: a service that
+        # answered an alias must see that alias where the person's name would be,
+        # or the promise breaks at the first follow-up step.
+        shown_sender = Participant(kind=mine.sender["kind"], name=mine.sender["name"])
+        if mine.recipients:
+            shown_recipients = [
+                Participant(kind=r["kind"], name=r["name"]) for r in mine.recipients
+            ]
 
     return Envelope(
         message_id=stored.id,
-        sender=shown,
-        recipients=[Participant(kind=r["kind"], name=r["name"]) for r in stored.recipients],
+        sender=shown_sender,
+        recipients=shown_recipients,
         sent_at=stored.created_at,
         subject=context.holdings.message_subject(realm_id, message_id) or "",
         body_size=stored.body_size,
@@ -574,6 +626,21 @@ def envelope(context: Context, caller: Caller, message_id: str) -> Envelope:
         attachments=stored.attachments,
         in_reply_to=stored.in_reply_to,
     )
+
+
+def _own_delivery(context: Context, caller: Caller, message_id: str) -> MailboxEntry | None:
+    """This caller's own entry for that message, in either view, or nothing.
+
+    Nothing is the case of a passed-on identifier, and then the message's own
+    envelope applies — the original sender, like for anybody holding an identifier.
+    """
+    if not isinstance(caller, Peer | Service):
+        return None
+    for view in (INBOX, OUTBOX):
+        for entry in context.holdings.mailbox_entries(mailbox_of(context, caller, view)):
+            if entry.message_id == message_id:
+                return entry
+    return None
 
 
 def subject_of(context: Context, caller: Caller, message_id: str) -> str:

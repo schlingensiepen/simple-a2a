@@ -264,7 +264,11 @@ def obtain_member_invitation(
         "member_mission",
         limits.MEMBER_MISSION_MAX_CHARS,
     )
-    if context.holdings.member_named(realm_id, team_id, name) is not None:
+    # Asked of the claim, not of the records: the claim is what the redemption will
+    # collide with. Asking whether a member *exists* gets one case wrong — a claim
+    # whose record never made it — and then the invitation is issued for a name that
+    # cannot be redeemed, and the one who finds out is the invited person.
+    if context.holdings.member_name_taken(realm_id, team_id, name):
         raise refusals.NameTaken(name, namespace="member")
 
     voucher = new_id()
@@ -298,7 +302,7 @@ def obtain_service_invitation(
         raise refusals.NotRealmMaster
     name = _check_name(service_name, "service_name")
     shown = _check_name(display_name, "display_name")
-    if context.holdings.service_named(peer.realm_id, name) is not None:
+    if context.holdings.service_name_taken(peer.realm_id, name):
         raise refusals.NameTaken(name, namespace="service")
 
     voucher = new_id()
@@ -315,6 +319,15 @@ def obtain_service_invitation(
     except NameTaken:
         raise refusals.NameTaken(shown, namespace="invitation") from None
     return voucher
+
+
+def _mission_of(context: Context, realm_id: str, digest: str, state: State) -> str | None:
+    """The mission an invitation carried, read while it is still in that state.
+
+    Read before the voucher is used up, because using it up renames the directory
+    the text lives in.
+    """
+    return context.holdings.invitation_mission(realm_id, digest, state)
 
 
 def redeem(context: Context, voucher: object, *, self_image: object = None) -> NewIdentity:
@@ -346,30 +359,62 @@ def redeem(context: Context, voucher: object, *, self_image: object = None) -> N
     realm_id = pointer.realm_id
     token = tokens.new_token()
 
-    if invitation.kind == SERVICE:
-        text = _check_text(
+    # Everything the caller sent is checked, and everything the invitation needs is
+    # read, *before* the voucher is used up. Otherwise a mistyped field costs
+    # somebody their invitation.
+    self_image_text = (
+        _check_text(
             self_image if isinstance(self_image, str) else "",
             "member_self_image",
             limits.MEMBER_SELF_IMAGE_MAX_CHARS,
         )
+        if invitation.kind == SERVICE
+        else ""
+    )
+    mission = _mission_of(context, realm_id, pointer.subject_id, located.state) or ""
+    team = (
+        context.holdings.team(realm_id, invitation.team_id or "")
+        if invitation.kind != SERVICE
+        else None
+    )
+    if invitation.kind != SERVICE and team is None:
+        raise refusals.UnknownIdentifier("invitation")
+
+    # The voucher is used up **before** the identity is made, and the order is the
+    # whole point. There is no journal here, so one of the two has to be first, and
+    # a crash between them has to leave the better wreck.
+    #
+    # This way round: a consumed voucher and no identity. Whoever presents it again
+    # is told "already redeemed, ask for a new one" — the answer that gets a
+    # rightful holder somewhere — and the invited name is still free, so the new
+    # invitation can use it.
+    #
+    # The other way round left an identity whose token had never reached anybody,
+    # a voucher still showing as open, and a second attempt answered with
+    # "name taken": the holder's token was gone for good, and the answer told them
+    # nothing they could act on.
+    if not context.holdings.consume_invitation(realm_id, voucher):
+        raise refusals.InvitationUsed
+
+    if invitation.kind == SERVICE:
         # The name is checked a second time here, because somebody can have taken
         # it between issuing and redeeming. Checked by *trying*: the claim is what
         # makes it atomic, so asking first and creating after would reopen the gap
         # it closes.
         try:
             created = context.holdings.create_service(
-                realm_id, new_id(), invitation.invited_name, token=token, self_image=text
+                realm_id,
+                new_id(),
+                invitation.invited_name,
+                token=token,
+                self_image=self_image_text,
             )
         except NameTaken:
             raise refusals.NameTaken(invitation.invited_name, namespace="service") from None
-        context.holdings.consume_invitation(realm_id, voucher)
         return NewIdentity(token=token, kind=Kind.SERVICE, name=created.name)
 
+    assert team is not None
     team_id = invitation.team_id or ""
-    team = context.holdings.team(realm_id, team_id)
-    if team is None:
-        raise refusals.UnknownIdentifier("invitation")
-    mission = context.holdings.invitation_mission(realm_id, pointer.subject_id, located.state) or ""
     invited = invitation.invited_name
     try:
         context.holdings.create_member(
@@ -383,7 +428,6 @@ def redeem(context: Context, voucher: object, *, self_image: object = None) -> N
         )
     except NameTaken:
         raise refusals.NameTaken(invited, namespace="member") from None
-    context.holdings.consume_invitation(realm_id, voucher)
     return NewIdentity(
         token=token,
         kind=Kind.PEER,
@@ -396,10 +440,19 @@ def redeem(context: Context, voucher: object, *, self_image: object = None) -> N
 # ------------------------------------------------------------------ revocations
 
 
-#: What a revocation says back. The subject keeps being named, because nothing
-#: disappeared — a revocation ends a permission, not a content.
 @dataclass(frozen=True)
 class Revocation:
+    """What a revocation says back.
+
+    The subject keeps being named, because nothing disappeared — a revocation ends
+    a permission, not a content.
+
+    `revoked` is read from the record afterwards rather than assumed from the fact
+    that the call was made. There is a case where the two differ: revoking an
+    invitation that has already been redeemed changes nothing, and saying "done"
+    there would report something that did not happen.
+    """
+
     name: str
     revoked: bool
     revoked_at: str | None
@@ -407,6 +460,12 @@ class Revocation:
 
 def _revoked_at(record) -> str | None:
     return getattr(record, "revoked_at", None)
+
+
+def _as_revoked(name: str, record) -> Revocation:
+    """Report what the record says, not what the call intended."""
+    at = _revoked_at(record)
+    return Revocation(name=name, revoked=at is not None, revoked_at=at)
 
 
 def revoke_member_token(
@@ -429,7 +488,7 @@ def revoke_member_token(
     context.holdings.revoke_member(realm_id, team_id, located.record.id)
     again = context.holdings.member(realm_id, team_id, located.record.id)
     assert again is not None
-    return Revocation(name=again.record.name, revoked=True, revoked_at=_revoked_at(again.record))
+    return _as_revoked(again.record.name, again.record)
 
 
 def revoke_service_token(context: Context, realm_id: str, service_name: str) -> Revocation:
@@ -439,7 +498,7 @@ def revoke_service_token(context: Context, realm_id: str, service_name: str) -> 
     context.holdings.revoke_service(realm_id, located.record.id)
     again = context.holdings.service(realm_id, located.record.id)
     assert again is not None
-    return Revocation(name=again.record.name, revoked=True, revoked_at=_revoked_at(again.record))
+    return _as_revoked(again.record.name, again.record)
 
 
 def revoke_observer_token(context: Context, realm_id: str, display_name: str) -> Revocation:
@@ -449,9 +508,7 @@ def revoke_observer_token(context: Context, realm_id: str, display_name: str) ->
     context.holdings.revoke_observer(realm_id, located.record.id)
     again = context.holdings.observer(realm_id, located.record.id)
     assert again is not None
-    return Revocation(
-        name=again.record.display_name, revoked=True, revoked_at=_revoked_at(again.record)
-    )
+    return _as_revoked(again.record.display_name, again.record)
 
 
 def revoke_invitation(context: Context, realm_id: str, display_name: str) -> Revocation:
@@ -467,11 +524,7 @@ def revoke_invitation(context: Context, realm_id: str, display_name: str) -> Rev
         context.holdings.revoke_invitation_named(realm_id, kind, display_name)
         again = context.holdings.invitation_named(realm_id, kind, display_name)
         assert again is not None
-        return Revocation(
-            name=again.record.display_name,
-            revoked=True,
-            revoked_at=_revoked_at(again.record),
-        )
+        return _as_revoked(again.record.display_name, again.record)
     raise refusals.UnknownName(display_name, namespace="invitation")
 
 

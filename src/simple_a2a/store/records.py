@@ -237,9 +237,11 @@ class Message(Record):
 class MailboxEntry(Record):
     """One delivery: which message, and the envelope as this recipient sees it.
 
-    `sender` is the sender *in this recipient's world*. For a central service
-    that is an alias where a name would otherwise be, so that the service can
-    reply without ever learning who wrote.
+    `sender` **and** `recipients` are the ones that hold *in this recipient's
+    world*. For a central service that means an alias where a name would
+    otherwise be — in what it received, and equally in what it sent: the promise
+    would be broken at the first follow-up step if its own outbox named the person
+    it had answered.
 
     `delivered_at` is written into the entry's *name*, which is what the ordering
     of a mailbox is made of, and it is read back from there. It is a field here so
@@ -254,6 +256,7 @@ class MailboxEntry(Record):
     message_id: str
     delivered_at: str
     sender: dict[str, str]
+    recipients: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

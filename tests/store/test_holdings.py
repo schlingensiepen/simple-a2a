@@ -347,14 +347,19 @@ def test_an_empty_realm_and_an_empty_team_are_legal(holdings: Holdings) -> None:
     assert list(holdings.members(empty_realm.id, empty_team.id)) == []
 
 
-def test_a_half_written_object_is_invisible_to_every_listing(holdings: Holdings, realm) -> None:
-    """What a crash in the middle of a write leaves behind, and why it is harmless.
+def test_a_half_written_file_is_invisible_to_every_listing(holdings: Holdings, realm) -> None:
+    """One write, interrupted: a stray file, never a half-filled record.
 
-    A write goes to a temporary file in the target's own directory and is then
-    renamed. A crash therefore leaves a stray file, never a half-filled record —
-    and every listing here iterates directories, so the stray is not something a
-    reader can trip over. It is never cleaned up, because nothing here deletes;
-    it costs disk and nothing else.
+    This is the narrow claim, and only the narrow one. A write goes to a temporary
+    file in the target's own directory and is then renamed, so what is left is a
+    stray — and every listing here iterates directories, so no reader trips over
+    it. It is never cleaned up, because nothing here deletes; it costs disk and
+    nothing else.
+
+    **What this does not cover** is an interrupted *sequence* of writes, where the
+    first step is complete and visible and the second never happened. Those are not
+    harmless, they cannot be made atomic without a journal, and each one is tested
+    where its order is decided — see `tests/domain/test_crash_and_leak.py`.
     """
     leftover = holdings.layout.teams(realm.id) / ".tmp-abcdef.part"
     leftover.parent.mkdir(parents=True, exist_ok=True)
