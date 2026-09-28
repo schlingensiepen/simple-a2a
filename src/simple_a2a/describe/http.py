@@ -315,3 +315,31 @@ def cascade(surface: str, *, description: str, build: dict[str, str]) -> APIRout
         )
 
     return router
+
+
+#: The media type of a served file, from the extension of the name in the address.
+#: Derived rather than stored: a browser can then show what a browser can show, and the
+#: service keeps nothing for it. Anything unrecognised is a download, which is the safe
+#: answer — a wrong guess here is a wrong guess in somebody's browser.
+MEDIA_TYPES = {
+    ".md": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".zip": "application/zip",
+}
+
+
+def media_type(name: str) -> str:
+    """What to label a served file, from its name alone."""
+    for extension, found in MEDIA_TYPES.items():
+        if name.lower().endswith(extension):
+            return found
+    return "application/octet-stream"

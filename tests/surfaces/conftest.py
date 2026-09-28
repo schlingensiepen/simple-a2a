@@ -20,6 +20,7 @@ from simple_a2a.admin.app import build_app as build_admin
 from simple_a2a.core import config
 from simple_a2a.domain.context import Context
 from simple_a2a.messaging.app import build_app as build_messaging
+from simple_a2a.observe.app import build_app as build_observe
 from simple_a2a.store.holdings import Holdings
 from simple_a2a.store.layout import Layout
 
@@ -70,3 +71,10 @@ def participants(context: Context) -> Iterator[TestClient]:
 
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def observation(context: Context) -> Iterator[TestClient]:
+    """The observation surface, with nothing presented."""
+    with TestClient(build_observe(context, build=BUILD), raise_server_exceptions=False) as client:
+        yield client

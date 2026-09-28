@@ -511,11 +511,11 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         file_id: FileId, file_name: FileName, request: Request, caller: Caller = anyone_of
     ) -> Response:
         with guard("GET /files/{file_id}/{file_name}"):
-            safe = _safe_file_name(file_name)
+            safe = messages.safe_file_name(file_name)
             content = messages.fetch_file(context, caller, file_id)
             return Response(
                 content,
-                media_type=_media_type(safe),
+                media_type=http.media_type(safe),
                 headers={"Content-Disposition": f'attachment; filename="{safe}"'},
             )
 
@@ -784,48 +784,6 @@ def _text_or_file(
     if len(found) > limit:
         raise refusals.TooLarge(field, limit=limit, actual=len(found), unit="characters")
     return found
-
-
-def _safe_file_name(name: str) -> str:
-    """The name a file is saved under, smoothed rather than trusted.
-
-    It goes into a response header, so control characters are refused and directory
-    parts are dropped: a name is not a path.
-    """
-    if any(ch in name for ch in "\r\n\t\0") or '"' in name:
-        raise refusals.InvalidInput(
-            "file_name", reason="no control characters and no quotation marks"
-        )
-    smoothed = name.replace("\\", "/").rsplit("/", 1)[-1]
-    if not smoothed or smoothed in (".", ".."):
-        raise refusals.InvalidInput("file_name", reason="nothing is left of it as a name")
-    return smoothed
-
-
-#: The media type of a fetched file, from the extension of the name in the address.
-#: Derived rather than stored, so that a browser can show what a browser can show and
-#: the service keeps nothing for it.
-_MEDIA_TYPES = {
-    ".md": "text/markdown; charset=utf-8",
-    ".txt": "text/plain; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".csv": "text/csv; charset=utf-8",
-    ".html": "text/html; charset=utf-8",
-    ".pdf": "application/pdf",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".svg": "image/svg+xml",
-    ".zip": "application/zip",
-}
-
-
-def _media_type(name: str) -> str:
-    for extension, media_type in _MEDIA_TYPES.items():
-        if name.lower().endswith(extension):
-            return media_type
-    return "application/octet-stream"
 
 
 async def _raw(request: Request) -> str:

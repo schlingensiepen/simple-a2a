@@ -18,16 +18,14 @@ host name.
 
 from __future__ import annotations
 
-#: Marks used in the listings. Written as words rather than symbols: a reader that
-#: has never seen this service cannot look up what a dagger means.
-REALM_MASTER = "realm master"
-REVOKED = "token revoked"
+from urllib.parse import quote
+
+from simple_a2a.describe import directories
 
 
+#: Percent-encoding a name for an address, because a name may contain spaces. The
+#: shared renderers do their own; this is for the texts written here.
 def _quote(name: str) -> str:
-    """A name in a path, percent-encoded, because a name may contain spaces."""
-    from urllib.parse import quote
-
     return quote(name, safe="")
 
 
@@ -110,116 +108,67 @@ To answer something you received, read `GET /guide/sending`.
 
 
 def peers(*, entries: list[dict[str, object]], offset: int, limit: int, total: int) -> str:
-    """The team, by name, with a mark where a mark is due.
+    """The team, from the inside. The text itself is shared with the observation.
 
-    Names first and in order, because the names are what a caller can address. The
-    two marks are spelled out rather than symbols: a reader that has never seen this
-    service cannot look a symbol up.
+    Same content, different standpoint — so the wording lives one floor down and
+    takes the address prefix as a parameter. Written twice it would drift the moment
+    somebody improved one copy.
     """
-    if not entries:
-        return """# Your team
-
-Nobody else is here yet. A message with no recipients is accepted and tells you so,
-but it reaches nobody — invite somebody first: `POST /invitations/peer`, and
-`GET /guide/directories` says how an invitation travels.
-"""
-    lines = []
-    for entry in entries:
-        name = str(entry["member_name"])
-        marks = []
-        if entry["is_realm_master"]:
-            marks.append(REALM_MASTER)
-        if entry["token_revoked"]:
-            marks.append(REVOKED)
-        suffix = f" ({', '.join(marks)})" if marks else ""
-        lines.append(
-            f"- **{name}**{suffix} — `GET /peers/{_quote(name)}/mission`, "
-            f"`GET /peers/{_quote(name)}/self`"
-        )
-    window = (
-        f"\nShowing {offset + 1} to {offset + len(entries)} of {total}. "
-        "Ask for a different window with `offset` and `limit`.\n"
-        if total > len(entries)
-        else ""
+    return directories.peers(
+        entries=entries,
+        offset=offset,
+        total=total,
+        prefix="/peers",
+        heading="Your team",
+        empty=(
+            "Nobody else is here yet. A message with no recipients is accepted and tells "
+            "you so, but it reaches nobody — invite somebody first with "
+            "`POST /invitations/peer`, and `GET /guide/directories` says how an invitation "
+            "travels."
+        ),
+        closing=(
+            "These are the names you can address: send to them with "
+            "`POST /peers/messages`, naming them in `recipients`, or leave that out to "
+            "reach everybody else at once. Sending to somebody whose token was revoked "
+            "still works; nothing will read it."
+        ),
     )
-    return f"""# Your team
-
-These are the names you can address, in alphabetical order. Send to them with
-`POST /peers/messages`.
-
-{chr(10).join(lines)}
-{window}
-A name marked `{REVOKED}` belongs to somebody whose token was taken away. They stay
-here and stay readable, because messages from them are in your inbox and you have to
-be able to look up who that was. Sending to them still works; nothing will read it.
-A name marked `{REALM_MASTER}` can obtain invitations for central services.
-"""
 
 
 def peer(*, name: str, is_realm_master: bool, revoked: bool) -> str:
-    marks = []
-    if is_realm_master:
-        marks.append(f"Carries the {REALM_MASTER} right.")
-    if revoked:
-        marks.append(
-            "Their token has been revoked. They stay here and stay readable; sending to "
-            "them works and nothing will read it."
-        )
-    return f"""# {name}
-
-{" ".join(marks) if marks else "One identity in your team, like you."}
-
-- `GET /peers/{_quote(name)}/mission` — what they were invited for, set by whoever
-  invited them and unchanged since.
-- `GET /peers/{_quote(name)}/self` — what they say about themselves. They keep this
-  one, so it says what they actually do.
-
-Send to them with `POST /peers/messages`, naming them in `recipients`.
-"""
+    return directories.peer(
+        name=name,
+        is_realm_master=is_realm_master,
+        revoked=revoked,
+        prefix="/peers",
+        closing="Send to them with `POST /peers/messages`, naming them in `recipients`.",
+    )
 
 
 def services(*, entries: list[dict[str, object]], offset: int, limit: int, total: int) -> str:
-    """The registry: the same questions, the same shape, one word different."""
-    if not entries:
-        return """# Central services
-
-There are none. A central service is something outside any team that is addressed by
-name — a thing that answers requests rather than a colleague. A realm master can
-have one added: `POST /invitations/service`.
-"""
-    lines = [
-        f"- **{entry['service_name']}**"
-        f"{' (token revoked)' if entry['token_revoked'] else ''} — "
-        f"`GET /services/{_quote(str(entry['service_name']))}/self`"
-        for entry in entries
-    ]
-    window = (
-        f"\nShowing {offset + 1} to {offset + len(entries)} of {total}. "
-        "Ask for a different window with `offset` and `limit`.\n"
-        if total > len(entries)
-        else ""
+    return directories.services(
+        entries=entries,
+        offset=offset,
+        total=total,
+        prefix="/services",
+        heading="Central services",
+        empty=(
+            "There are none. A central service is something outside any team that is "
+            "addressed by name — a thing that answers requests rather than a colleague. "
+            "A realm master can have one added with `POST /invitations/service`."
+        ),
+        closing=(
+            "Send to one with `POST /services/messages`, naming it in `recipient`. Each "
+            "keeps one text saying what it can do; there is no second text, because a "
+            "central service was not invited for a purpose."
+        ),
     )
-    return f"""# Central services
-
-These are addressed by name from anywhere in this installation, and they are not in
-your team. Send to one with `POST /services/messages`, naming it in `recipient`.
-
-{chr(10).join(lines)}
-{window}
-Each one keeps a text saying what it can do. There is no second text: a central
-service was not invited for a purpose, it entered what it is able to do.
-"""
 
 
 def service(*, name: str, revoked: bool) -> str:
-    return f"""# {name}
-
-A central service of this installation, addressed by name from anywhere here.
-{"Its token has been revoked; sending to it works and nothing will read it." if revoked else ""}
-
-- `GET /services/{_quote(name)}/self` — what it says it can do.
-
-Send to it with `POST /services/messages`, naming it in `recipient`. There is no
-mission text here: a central service registered itself, so what it can do is its own
-statement rather than somebody's expectation of it.
-"""
+    return directories.service(
+        name=name,
+        revoked=revoked,
+        prefix="/services",
+        closing="Send to it with `POST /services/messages`, naming it in `recipient`.",
+    )

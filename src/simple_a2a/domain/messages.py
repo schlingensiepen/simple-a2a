@@ -24,6 +24,7 @@ always sees the alias.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,6 +39,10 @@ from simple_a2a.store.records import Alias, MailboxEntry, Message, Participant
 
 INBOX = "inbox"
 OUTBOX = "outbox"
+
+#: The shape of a timestamp a caller may send. Checked rather than parsed: what the
+#: comparison needs is the format, and a clock would add a second notion of time.
+EXAMPLE_SHAPE = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\Z")
 
 
 @dataclass(frozen=True)
@@ -689,8 +694,101 @@ def fetch_file(context: Context, caller: Caller, file_id: str) -> bytes:
 # -------------------------------------------------------------- the observation
 
 
+@dataclass(frozen=True)
+class Filters:
+    """What an observer may narrow the traffic of one team by.
+
+    Kind and name always travel together, like every statement about a participant:
+    inside one team the other side can be a member **or** a central service, and the
+    kind says which namespace the name is in. One without the other is invalid input
+    rather than a guess, because guessing would make the meaning of a name depend on
+    another field — the thing this pair exists to avoid.
+
+    `from` and `to` include both ends. An observer asking about a day means the day.
+    """
+
+    sender: Participant | None = None
+    recipient: Participant | None = None
+    since: str | None = None
+    until: str | None = None
+
+    @staticmethod
+    def of(
+        sender_kind: object = None,
+        sender_name: object = None,
+        recipient_kind: object = None,
+        recipient_name: object = None,
+        since: object = None,
+        until: object = None,
+    ) -> Filters:
+        return Filters(
+            sender=_pair(sender_kind, sender_name, "sender"),
+            recipient=_pair(recipient_kind, recipient_name, "recipient"),
+            since=_moment(since, "from"),
+            until=_moment(until, "to"),
+        )
+
+    def keeps(self, envelope: Envelope) -> bool:
+        if self.sender is not None and (
+            envelope.sender.kind != self.sender.kind
+            or comparison_key(envelope.sender.name) != comparison_key(self.sender.name)
+        ):
+            return False
+        if self.recipient is not None and not any(
+            person.kind == self.recipient.kind
+            and comparison_key(person.name) == comparison_key(self.recipient.name)
+            for person in envelope.recipients
+        ):
+            return False
+        if self.since is not None and envelope.sent_at < self.since:
+            return False
+        return not (self.until is not None and envelope.sent_at > self.until)
+
+
+#: The kinds a filter may name. `alias` is not among them: an observer sees the real
+#: participant, and an alias is resolved before it ever reaches them.
+FILTERABLE_KINDS = ("peer", "service")
+
+
+def _pair(kind: object, name: object, field: str) -> Participant | None:
+    if kind is None and name is None:
+        return None
+    if kind is None or name is None:
+        raise refusals.InvalidInput(
+            f"{field}_kind" if kind is None else f"{field}_name",
+            reason=f"{field}_kind and {field}_name go together",
+        )
+    if kind not in FILTERABLE_KINDS:
+        raise refusals.InvalidInput(f"{field}_kind", reason="one of peer, service")
+    if check_name(name) is not None:
+        raise refusals.InvalidInput(f"{field}_name", reason="a name")
+    return Participant(kind=str(kind), name=str(name))
+
+
+def _moment(value: object, field: str) -> str | None:
+    """A timestamp, checked by shape rather than parsed into a clock.
+
+    Compared as text, which is exactly right for this format: an ISO timestamp in UTC
+    sorts lexicographically the way it sorts chronologically, which is the same
+    property the mailbox ordering rests on.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not EXAMPLE_SHAPE.match(value):
+        raise refusals.InvalidInput(
+            field, reason="a timestamp like 2026-09-28T09:12:44.081Z, in UTC with milliseconds"
+        )
+    return value
+
+
 def team_traffic(
-    context: Context, observer: Observer, team_id: str, *, offset: int, limit: int
+    context: Context,
+    observer: Observer,
+    team_id: str,
+    *,
+    offset: int,
+    limit: int,
+    filters: Filters | None = None,
 ) -> list[Envelope]:
     """Everything that happened in one team, newest first.
 
@@ -720,6 +818,8 @@ def team_traffic(
                 in_reply_to=stored.in_reply_to,
             )
         )
+    if filters is not None:
+        found = [envelope for envelope in found if filters.keeps(envelope)]
     found.sort(key=lambda e: e.sent_at, reverse=True)
     return found[offset : offset + limit]
 
@@ -792,3 +892,24 @@ def mailbox(
 def counted_mailbox(context: Context, caller: Peer | Service, view: str) -> int:
     """How many entries a mailbox has, for a listing that says where its window sits."""
     return len(context.holdings.mailbox_entries(mailbox_of(context, caller, view)))
+
+
+def safe_file_name(name: str) -> str:
+    """The name a file is saved under: smoothed, not trusted.
+
+    It goes into a response header and it is the last part of an address, so control
+    characters and quotation marks are **refused** — a caller has to see that mistake —
+    and a directory part is **dropped**. The specification uses two verbs there and
+    means two things.
+
+    Lives here rather than on a surface because both surfaces that serve a file need
+    it, and the second copy is where the two would drift apart.
+    """
+    if any(ch in name for ch in "\r\n\t\0") or '"' in name:
+        raise refusals.InvalidInput(
+            "file_name", reason="no control characters and no quotation marks"
+        )
+    smoothed = name.replace("\\", "/").rsplit("/", 1)[-1]
+    if not smoothed or smoothed in (".", ".."):
+        raise refusals.InvalidInput("file_name", reason="nothing is left of it as a name")
+    return smoothed
