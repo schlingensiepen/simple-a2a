@@ -722,3 +722,73 @@ def team_traffic(
         )
     found.sort(key=lambda e: e.sent_at, reverse=True)
     return found[offset : offset + limit]
+
+
+@dataclass(frozen=True)
+class MailboxView:
+    """One line of a mailbox listing: the envelope, without the body.
+
+    Assembled from two places on purpose. The delivery says who the sender is **in
+    this reader's world**; the message says what it weighs and what it is called. A
+    listing that took the sender from the message would show a service the name it
+    must never see.
+    """
+
+    message_id: str
+    sender: Participant | None
+    recipients: list[Participant] | None
+    sent_at: str
+    subject: str
+    body_size: int
+    total_size: int
+    attachment_count: int
+    in_reply_to: str | None
+
+
+def mailbox(
+    context: Context,
+    caller: Peer | Service,
+    view: str,
+    *,
+    offset: int,
+    limit: int,
+) -> list[MailboxView]:
+    """A window over a mailbox, newest first, envelopes only.
+
+    The inbox names the sender and not the recipients — the recipient is the reader.
+    The outbox names the recipients and not the sender — the sender is the reader.
+    One shape, one word different.
+    """
+    found: list[MailboxView] = []
+    realm_id = caller.realm_id
+    for entry in list_mailbox(context, caller, view, offset=offset, limit=limit):
+        stored = context.holdings.message(realm_id, entry.message_id)
+        if stored is None:
+            continue
+        found.append(
+            MailboxView(
+                message_id=entry.message_id,
+                sender=(
+                    Participant(kind=entry.sender["kind"], name=entry.sender["name"])
+                    if view == INBOX
+                    else None
+                ),
+                recipients=(
+                    [Participant(kind=r["kind"], name=r["name"]) for r in entry.recipients]
+                    if view == OUTBOX
+                    else None
+                ),
+                sent_at=stored.created_at,
+                subject=context.holdings.message_subject(realm_id, entry.message_id) or "",
+                body_size=stored.body_size,
+                total_size=stored.total_size,
+                attachment_count=len(stored.attachments),
+                in_reply_to=stored.in_reply_to,
+            )
+        )
+    return found
+
+
+def counted_mailbox(context: Context, caller: Peer | Service, view: str) -> int:
+    """How many entries a mailbox has, for a listing that says where its window sits."""
+    return len(context.holdings.mailbox_entries(mailbox_of(context, caller, view)))

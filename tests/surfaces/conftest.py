@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from simple_a2a.admin.app import build_app as build_admin
 from simple_a2a.core import config
 from simple_a2a.domain.context import Context
+from simple_a2a.messaging.app import build_app as build_messaging
 from simple_a2a.store.holdings import Holdings
 from simple_a2a.store.layout import Layout
 
@@ -54,3 +55,18 @@ def no_token(context: Context) -> Iterator[TestClient]:
     """The same surface with nothing presented, for the answers before an operation."""
     with TestClient(build_admin(context, build=BUILD), raise_server_exceptions=False) as client:
         yield client
+
+
+@pytest.fixture
+def participants(context: Context) -> Iterator[TestClient]:
+    """The participant surface, with nothing presented.
+
+    Tokens go on individual calls rather than on the client, because most of what is
+    interesting here is two or three different callers on one installation.
+    """
+    with TestClient(build_messaging(context, build=BUILD), raise_server_exceptions=False) as client:
+        yield client
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
