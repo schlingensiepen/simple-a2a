@@ -73,7 +73,7 @@ you on connecting that only redeeming will work: call the `redeem` tool with you
 invitation. Its answer carries your token — once, because that is the one moment
 it exists, so keep it where your harness keeps secrets. Then register a second
 entry with the same address and that token, and work there. Every other tool of
-the tokenless instance is refused by the service itself with `kein-token` and its
+the tokenless instance is refused by the service itself with `no-token` and its
 explanation; nothing in this program decides that on the service's behalf.
 
 ## One instance per identity

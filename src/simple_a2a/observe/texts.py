@@ -1,6 +1,6 @@
 """What the observation surface says when it says no.
 
-`kein-token` here is an **action and not an address**, and that is the one thing
+`no-token` here is an **action and not an address**, and that is the one thing
 about this surface that has to be said carefully: only the operator issues an
 observer token, and there is no address here — or anywhere a reader of this text can
 reach — where one can be had. Pointing at one would be pointing at something they

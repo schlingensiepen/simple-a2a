@@ -105,7 +105,7 @@ def test_an_address_this_surface_does_not_have_names_its_entry(no_token: TestCli
     answer = no_token.get("/nonsense")
 
     assert answer.status_code == 404
-    assert answer.json()["type"] == "unbekannte-adresse"
+    assert answer.json()["type"] == "unknown-address"
     assert "GET /" in answer.json()["message"]
 
 
@@ -113,14 +113,14 @@ def test_an_address_with_the_wrong_method_says_which_it_takes(admin: TestClient)
     answer = admin.delete("/realms")
 
     assert answer.status_code == 405
-    assert answer.json()["type"] == "falsches-verb"
+    assert answer.json()["type"] == "wrong-verb"
 
 
 def test_a_guide_part_this_surface_has_not_points_at_the_entry(no_token: TestClient) -> None:
     answer = no_token.get("/guide/sending")
 
     assert answer.status_code == 404
-    assert answer.json()["type"] == "unbekannter-name"
+    assert answer.json()["type"] == "unknown-name"
     assert "GET /" in answer.json()["message"]
 
 
@@ -131,7 +131,7 @@ def test_nothing_behind_the_cascade_answers_without_a_secret(no_token: TestClien
     answer = no_token.get("/realms")
 
     assert answer.status_code == 401
-    assert answer.json()["type"] == "kein-token"
+    assert answer.json()["type"] == "no-token"
     # And it says where to get one, with a way that works from here.
     assert "Authorization" in answer.json()["message"]
     assert "new" in answer.json()["message"]
@@ -141,7 +141,7 @@ def test_a_secret_nobody_issued_is_answered_as_no_token(no_token: TestClient) ->
     answer = no_token.get("/realms", headers={"Authorization": "Bearer " + "b" * 43})
 
     assert answer.status_code == 401
-    assert answer.json()["type"] == "kein-token"
+    assert answer.json()["type"] == "no-token"
 
 
 def test_the_administration_secret_works_on_an_empty_installation(admin: TestClient) -> None:
@@ -165,7 +165,7 @@ def test_creating_the_same_realm_twice_is_refused_by_name(admin: TestClient) -> 
     answer = admin.post("/realms", json={"realm_name": "HOUSEHOLD"})
 
     assert answer.status_code == 409
-    assert answer.json()["type"] == "name-vergeben"
+    assert answer.json()["type"] == "name-taken"
     assert answer.json()["name"] == "HOUSEHOLD"
     assert "GET /realms" in answer.json()["message"]
 
@@ -175,7 +175,7 @@ def test_an_unusable_realm_name_names_the_field_and_an_example(admin: TestClient
     answer = admin.post("/realms", json={"realm_name": bad})
 
     assert answer.status_code == 400
-    assert answer.json()["type"] == "ungültige-eingabe"
+    assert answer.json()["type"] == "invalid-input"
     assert answer.json()["field"] == "realm_name"
     assert "Example" in answer.json()["message"]
 
@@ -185,7 +185,7 @@ def test_a_body_that_does_not_fit_at_all_is_still_our_own_rejection(admin: TestC
     answer = admin.post("/realms", json={"nonsense": 1})
 
     assert answer.status_code == 400
-    assert answer.json()["type"] == "ungültige-eingabe"
+    assert answer.json()["type"] == "invalid-input"
     assert answer.json()["field"] == "realm_name"
 
 
@@ -202,7 +202,7 @@ def test_a_window_over_a_listing_is_refused_above_a_hundred(admin: TestClient) -
     answer = admin.get("/realms?limit=101")
 
     assert answer.status_code == 413
-    assert answer.json()["type"] == "zu-groß"
+    assert answer.json()["type"] == "too-large"
     assert answer.json()["limit"] == 100
 
 
@@ -224,7 +224,7 @@ def test_a_team_in_an_unknown_realm_says_where_the_realms_are(admin: TestClient)
     answer = admin.post("/realms/nowhere/teams", json={"team_name": "kitchen"})
 
     assert answer.status_code == 404
-    assert answer.json()["type"] == "unbekannter-name"
+    assert answer.json()["type"] == "unknown-name"
     assert "GET /realms" in answer.json()["message"]
 
 
@@ -450,7 +450,7 @@ def test_a_note_that_is_not_utf_8_is_refused_against_the_body(admin: TestClient)
     answer = admin.put("/setup-note", content=b"\xff\xfe not text")
 
     assert answer.status_code == 400
-    assert answer.json()["type"] == "ungültige-eingabe"
+    assert answer.json()["type"] == "invalid-input"
 
 
 def test_prose_is_labelled_the_way_the_caller_asked(admin: TestClient) -> None:

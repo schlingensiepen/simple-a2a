@@ -9,6 +9,8 @@ type — so a new refusal cannot quietly answer as somebody else's.
 from __future__ import annotations
 
 import inspect
+import re
+from pathlib import Path
 
 import pytest
 
@@ -113,7 +115,7 @@ def test_the_body_is_the_type_the_text_and_the_facts() -> None:
 
     assert made.status == 413
     assert made.body() == {
-        "type": "zu-groß",
+        "type": "too-large",
         "message": "The body is over the limit. Attach it as a file instead.",
         "field": "body",
         "limit": 1024,
@@ -122,5 +124,27 @@ def test_the_body_is_the_type_the_text_and_the_facts() -> None:
 
 def test_a_type_is_written_the_way_it_goes_over_the_wire() -> None:
     """The value is the wire value; nothing translates it on the way out."""
-    assert str(rejections.Type.NO_TOKEN) == "kein-token"
-    assert str(rejections.Type.TOO_LARGE) == "zu-groß"
+    assert str(rejections.Type.NO_TOKEN) == "no-token"
+    assert str(rejections.Type.TOO_LARGE) == "too-large"
+
+
+def test_every_type_is_a_plain_ascii_word_an_agent_can_type() -> None:
+    """The type is what a caller branches on, so it has to survive being copied.
+
+    The first catalogue had the types in the working language of the people who
+    wrote the specification, one of them with an `ß` in it: a value that breaks in
+    any context that only carries ASCII and gets mistyped by anyone who writes it
+    into a comparison.
+    """
+    for kind in rejections.Type:
+        assert re.fullmatch(r"[a-z]+(-[a-z]+)*", kind.value), kind.value
+    assert re.fullmatch(r"[a-z]+(-[a-z]+)*", refusals.NO_RECIPIENT)
+
+
+def test_the_participant_guide_names_every_type_and_no_other() -> None:
+    """The guide lists the catalogue as a table; the table and the code agree."""
+    text = (Path(rejections.__file__).parent / "texts" / "messaging" / "concepts.md").read_text(
+        encoding="utf-8"
+    )
+    named = set(re.findall(r"^\| `([a-z-]+)` \| \d{3} \|", text, flags=re.MULTILINE))
+    assert named == {kind.value for kind in rejections.Type}

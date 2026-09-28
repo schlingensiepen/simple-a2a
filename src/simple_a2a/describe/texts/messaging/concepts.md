@@ -151,6 +151,28 @@ verb for a known address 405, an invitation already redeemed 409, a
 name collision 409, a malformed or missing field 400, an exceeded
 limit 413, and a fault of ours 500.
 
+| Type | Status | Means |
+|---|---|---|
+| `no-token` | 401 | no token, or one that cannot be resolved |
+| `token-revoked` | 401 | the token was revoked |
+| `wrong-token` | 403 | a valid token of the wrong kind for this operation |
+| `not-realm-master` | 403 | the realm master right is missing |
+| `unknown-name` | 404 | a name that is not known where it was looked for |
+| `unknown-identifier` | 404 | an id that is unknown, used up, revoked or not in your realm |
+| `unknown-address` | 404 | no such address on this surface |
+| `wrong-verb` | 405 | the address exists, but not with this verb |
+| `invitation-used` | 409 | the invitation was already redeemed |
+| `name-taken` | 409 | the name is already taken |
+| `invalid-input` | 400 | a field is missing or has the wrong shape |
+| `too-large` | 413 | a limit is exceeded |
+| `internal-error` | 500 | a fault of ours; the call may be repeated |
+
+Branch on the type, not on the status and not on the text: the text
+belongs to the operation that refused and says different things in
+different places, the type does not change. A warning carries a `code`
+instead; the one there is, `no-recipient`, means a message went out
+but reached nobody.
+
 Every refusal names a way that you can actually walk. A refusal
 about a field names the field, the right shape and an example; one
 about a limit names the limit. If a token that worked stops

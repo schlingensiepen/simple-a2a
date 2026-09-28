@@ -157,7 +157,7 @@ def test_a_missing_teaching_text_is_found_before_anybody_meets_it() -> None:
 
     found = gate.check_teaching(register)
     assert not found
-    assert "kein-token" in found.report()
+    assert "no-token" in found.report()
 
 
 def test_a_register_with_every_text_passes() -> None:

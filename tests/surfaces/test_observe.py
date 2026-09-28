@@ -77,7 +77,7 @@ def test_without_a_token_it_says_who_issues_one_and_names_no_address(
     answer = observation.get("/teams")
 
     assert answer.status_code == 401
-    assert answer.json()["type"] == "kein-token"
+    assert answer.json()["type"] == "no-token"
     message = answer.json()["message"]
     assert "set this installation up" in message
     assert "/realms" not in message and "8252" not in message
@@ -241,7 +241,7 @@ def test_a_kind_without_a_name_is_invalid_input(admin: TestClient, observation: 
     answer = observation.get("/teams/kitchen/traffic?sender_kind=peer", headers=bearer(token))
 
     assert answer.status_code == 400
-    assert answer.json()["type"] == "ungültige-eingabe"
+    assert answer.json()["type"] == "invalid-input"
     assert "together" in answer.json()["message"] or "together" in str(answer.json())
 
 
@@ -258,7 +258,7 @@ def test_a_name_that_is_not_in_the_team_is_refused_rather_than_answered_with_not
     )
 
     assert answer.status_code == 404
-    assert answer.json()["type"] == "unbekannter-name"
+    assert answer.json()["type"] == "unknown-name"
 
 
 def test_an_alias_cannot_be_filtered_by(admin: TestClient, observation: TestClient) -> None:
@@ -351,7 +351,7 @@ def test_a_message_from_another_installation_is_an_unknown_identifier(
     answer = observation.get("/messages/" + "z" * 43, headers=bearer(token))
 
     assert answer.status_code == 404
-    assert answer.json()["type"] == "unbekannte-kennung"
+    assert answer.json()["type"] == "unknown-identifier"
 
 
 def test_nothing_on_this_surface_names_another(observation: TestClient) -> None:

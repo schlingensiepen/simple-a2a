@@ -146,3 +146,20 @@ collision, 409; a missing or malformed field, 400, naming the field,
 the right shape and an example; an exceeded limit, 413, naming the
 limit; and a fault of ours, 500, on which the call may simply be
 repeated.
+
+| Type | Status | Means |
+|---|---|---|
+| `no-token` | 401 | no token, or one that cannot be resolved |
+| `token-revoked` | 401 | the token was revoked |
+| `wrong-token` | 403 | a valid token of the wrong kind for this operation |
+| `unknown-name` | 404 | a name that is not known where it was looked for |
+| `unknown-address` | 404 | no such address on this surface |
+| `wrong-verb` | 405 | the address exists, but not with this verb |
+| `name-taken` | 409 | the name is already taken |
+| `invalid-input` | 400 | a field is missing or has the wrong shape |
+| `too-large` | 413 | a limit is exceeded |
+| `internal-error` | 500 | a fault of ours; the call may be repeated |
+
+Branch on the type, not on the status and not on the text: the text
+belongs to the operation that refused and says different things in
+different places, the type does not change.

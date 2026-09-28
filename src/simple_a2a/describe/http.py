@@ -157,7 +157,7 @@ def install_handlers(
 
         Left to the framework this is a 422 with a shape of its own — a rejection
         outside a catalogue that says it is closed, and a second error format for a
-        caller to learn. It is the same `ungültige-eingabe` as any other malformed
+        caller to learn. It is the same `invalid-input` as any other malformed
         input, and it says so with the text of the operation it happened at.
         """
         route = request.scope.get("route")
@@ -217,7 +217,7 @@ def _pruned(document: dict[str, Any]) -> dict[str, Any]:
 
     The framework documents a validation error of its own shape on every route that
     takes a body or a parameter. We never answer with it — such a case comes back as
-    `ungültige-eingabe` from the closed catalogue — so leaving it in the description
+    `invalid-input` from the closed catalogue — so leaving it in the description
     would advertise a fourteenth kind of rejection that does not exist.
     """
     for verbs in (document.get("paths") or {}).values():

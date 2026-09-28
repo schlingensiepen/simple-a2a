@@ -158,6 +158,23 @@ address, 405; a malformed parameter, 400, naming the parameter, the
 right shape and an example; and a fault of ours, 500, on which the
 call may simply be repeated.
 
+| Type | Status | Means |
+|---|---|---|
+| `no-token` | 401 | no token, or one that cannot be resolved |
+| `token-revoked` | 401 | the token was revoked |
+| `wrong-token` | 403 | a valid token of the wrong kind for this operation |
+| `unknown-name` | 404 | a name that is not known where it was looked for |
+| `unknown-identifier` | 404 | an id that is unknown, used up, revoked or not in your realm |
+| `unknown-address` | 404 | no such address on this surface |
+| `wrong-verb` | 405 | the address exists, but not with this verb |
+| `invalid-input` | 400 | a field is missing or has the wrong shape |
+| `too-large` | 413 | a limit is exceeded |
+| `internal-error` | 500 | a fault of ours; the call may be repeated |
+
+Branch on the type, not on the status and not on the text: the text
+belongs to the operation that refused and says different things in
+different places, the type does not change.
+
 There is no replacement for a lost or revoked token, and no call here
 produces one: ask the operator of this installation, who is the only
 one who issues them.

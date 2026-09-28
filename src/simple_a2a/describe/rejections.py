@@ -8,7 +8,7 @@ because a new case felt special.
 **The type is not the message.** Each type says *what kind* of no it is; what a
 particular no *teaches* belongs to the operation that gave it. The same type says
 different things in different places, and that is the rule rather than an
-exception: `kein-realmmaster` tells whoever is appointing that a realm master in
+exception: `not-realm-master` tells whoever is appointing that a realm master in
 their own team can do it, and tells whoever wants a service invitation that they
 can *ask* one. Two actions, one type.
 
@@ -17,14 +17,14 @@ plausible-sounding one — a walkable one. A text that points at something the
 reader cannot do is worse than no text, because it costs them an attempt before
 they find out.
 
-**Two types are deliberately blunt.** `unbekannte-kennung` covers unknown, used
+**Two types are deliberately blunt.** `unknown-identifier` covers unknown, used
 up, revoked and *in another realm*, because a reach across a realm boundary has
 to look exactly like a reach for something that does not exist — otherwise an
 identifier becomes a way of asking about other people's holdings. There the
 vagueness is the promise.
 
 **And one is deliberately separated** although it is formally just an unusable
-identifier: `einladung-verbraucht`. An invitation is usually held by its rightful
+identifier: `invitation-used`. An invitation is usually held by its rightful
 recipient, and "already redeemed, ask for a new one" gets them somewhere where
 "not found" leaves them stuck. Nothing is given away, because invitations cannot
 be guessed.
@@ -42,19 +42,19 @@ from simple_a2a.domain import refusals
 class Type(StrEnum):
     """The thirteen, and there is no fourteenth."""
 
-    UNKNOWN_ADDRESS = "unbekannte-adresse"
-    WRONG_VERB = "falsches-verb"
-    NO_TOKEN = "kein-token"
-    TOKEN_REVOKED = "token-entzogen"
-    WRONG_TOKEN = "falsches-token"
-    NOT_REALM_MASTER = "kein-realmmaster"
-    UNKNOWN_NAME = "unbekannter-name"
-    UNKNOWN_IDENTIFIER = "unbekannte-kennung"
-    INVITATION_USED = "einladung-verbraucht"
-    NAME_TAKEN = "name-vergeben"
-    INVALID_INPUT = "ungültige-eingabe"
-    TOO_LARGE = "zu-groß"
-    INTERNAL = "innerer-fehler"
+    UNKNOWN_ADDRESS = "unknown-address"
+    WRONG_VERB = "wrong-verb"
+    NO_TOKEN = "no-token"
+    TOKEN_REVOKED = "token-revoked"
+    WRONG_TOKEN = "wrong-token"
+    NOT_REALM_MASTER = "not-realm-master"
+    UNKNOWN_NAME = "unknown-name"
+    UNKNOWN_IDENTIFIER = "unknown-identifier"
+    INVITATION_USED = "invitation-used"
+    NAME_TAKEN = "name-taken"
+    INVALID_INPUT = "invalid-input"
+    TOO_LARGE = "too-large"
+    INTERNAL = "internal-error"
 
 
 #: The status of each type. Derived, never chosen at the call site: a type that

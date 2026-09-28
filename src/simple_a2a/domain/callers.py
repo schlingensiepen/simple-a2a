@@ -78,7 +78,7 @@ class Observer:
 
 Caller = Operator | Peer | Service | Observer
 
-#: The kinds named in a `falsches-token` refusal. A caller is told what they
+#: The kinds named in a `wrong-token` refusal. A caller is told what they
 #: need, in the words of the surface they are on.
 NEEDED = {
     Role.OPERATOR: "administration",

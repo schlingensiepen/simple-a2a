@@ -2,13 +2,13 @@
 
 Two of the per-operation differences here are the reason the rule exists at all.
 
-**`falsches-token` names a way the caller can walk.** A central service that tries a
+**`wrong-token` names a way the caller can walk.** A central service that tries a
 team operation is not told "get an agent-in-team token" — it cannot get one. It is
 told what it *can* do. And a team member at the alias operation is not told to get a
 service token; they are told to send to a name and set `in_reply_to`, which is the
 same act by the means they have.
 
-**`kein-realmmaster` says two different things.** Appointing: a realm master in your
+**`not-realm-master` says two different things.** Appointing: a realm master in your
 own team can do it. Obtaining a service invitation: you can **ask** one. Two actions,
 one type.
 

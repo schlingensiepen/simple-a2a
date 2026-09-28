@@ -116,4 +116,4 @@ class InvalidInput(Refused):
 #: The one warning there is: a success that probably did not do what the caller
 #: wanted. Kept here rather than with the refusals' catalogue because it is
 #: produced by an operation, and closed for the same reason the types are.
-NO_RECIPIENT = "kein-empfaenger"
+NO_RECIPIENT = "no-recipient"

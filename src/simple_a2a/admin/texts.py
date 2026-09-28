@@ -7,7 +7,7 @@ wrong kind. They are registered from one place so that they cannot go missing at
 one operation, and any operation may still say something of its own.
 
 The rest differ per operation, and that is the rule rather than an exception:
-`unbekannter-name` at "create a team" is about the realm in the path, and at
+`unknown-name` at "create a team" is about the realm in the path, and at
 "revoke a member's token" it is about either the team or the member. Telling a
 caller which listing shows the names that would have worked is the whole job.
 

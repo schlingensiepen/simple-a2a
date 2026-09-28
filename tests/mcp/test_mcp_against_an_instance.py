@@ -535,27 +535,27 @@ def unknown_address(i: Instance) -> Case:
 
 
 #: Every rejection type of the catalogue that a tool can meet on this surface. Two
-#: are not here, and cannot be: `falsches-verb` — every tool calls its operation
+#: are not here, and cannot be: `wrong-verb` — every tool calls its operation
 #: with the verb the description gives it, so no tool can send another — and
-#: `innerer-fehler`, which needs the service itself to break, and no call from
-#: outside can arrange that. `unbekannte-adresse` *is* here, and **the answer is
+#: `internal-error`, which needs the service itself to break, and no call from
+#: outside can arrange that. `unknown-address` *is* here, and **the answer is
 #: wrong**: a file name with a slash in it should be refused as invalid input, but
 #: the router decodes `%2F` before the application is asked and finds no address.
 #: The case is kept because what it proves — the refusal comes through unchanged —
 #: holds either way; the day the service answers correctly, it goes red on purpose
-#: and moves to `ungültige-eingabe`. It is a tripwire, not an endorsement.
+#: and moves to `invalid-input`. It is a tripwire, not an endorsement.
 REFUSALS = {
-    "kein-token": no_token,
-    "token-entzogen": token_revoked,
-    "falsches-token": wrong_token,
-    "kein-realmmaster": not_realm_master,
-    "unbekannter-name": unknown_name,
-    "unbekannte-kennung": unknown_identifier,
-    "name-vergeben": name_taken,
-    "zu-groß": too_large,
-    "ungültige-eingabe": invalid_input,
-    "einladung-verbraucht": invitation_used,
-    "unbekannte-adresse": unknown_address,
+    "no-token": no_token,
+    "token-revoked": token_revoked,
+    "wrong-token": wrong_token,
+    "not-realm-master": not_realm_master,
+    "unknown-name": unknown_name,
+    "unknown-identifier": unknown_identifier,
+    "name-taken": name_taken,
+    "too-large": too_large,
+    "invalid-input": invalid_input,
+    "invitation-used": invitation_used,
+    "unknown-address": unknown_address,
 }
 
 
@@ -739,7 +739,7 @@ def test_with_only_an_invitation_it_starts_and_redeeming_works(
     assert "A2A_MCP_TOKEN" in said
     assert redeemed["isError"] is False
     assert "".join(bare.lines).count(token) == 1, "the new token appears exactly once"
-    assert refused["isError"] is True and "type: kein-token" in text_of(refused)
+    assert refused["isError"] is True and "type: no-token" in text_of(refused)
     assert me["isError"] is False and "Fiona" in text_of(me)
 
 
@@ -757,8 +757,8 @@ def test_without_a_token_a_subscription_is_refused_in_the_service_words(
     )
 
     for answer in (subscribed, listened):
-        assert answer["error"]["data"]["type"] == "kein-token"
-        assert "type: kein-token" in answer["error"]["message"]
+        assert answer["error"]["data"]["type"] == "no-token"
+        assert "type: no-token" in answer["error"]["message"]
 
 
 def test_an_open_stream_is_closed_with_its_result_when_the_input_ends(

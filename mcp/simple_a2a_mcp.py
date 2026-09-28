@@ -634,7 +634,7 @@ def instructions(address: str, poll_seconds: float, *, has_token: bool, redeem: 
         f"`{redeem}` with the invitation you were given. It answers with your token, "
         f"once — that is the one moment it exists. Then start an instance of this server "
         f"with {TOKEN_VARIABLE} set to that token and work there; every other tool here "
-        f"is refused by the service with `kein-token`.\n\n"
+        f"is refused by the service with `no-token`.\n\n"
     )
     return (
         f"This MCP server is not the contract. The contract is the self-description of "

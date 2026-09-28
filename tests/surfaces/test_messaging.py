@@ -72,7 +72,7 @@ def test_the_whole_way_from_an_invitation_to_an_answered_service(
         headers=bearer(anna["token"]),
     ).json()
     assert alone["recipients"] == []
-    assert alone["warnings"][0]["code"] == "kein-empfaenger"
+    assert alone["warnings"][0]["code"] == "no-recipient"
     assert "outbox" in alone["warnings"][0]["message"]
 
     # Anna invites Berta herself — anybody in a team may — and hers does not grant
@@ -156,7 +156,7 @@ def test_the_whole_way_from_an_invitation_to_an_answered_service(
         headers=bearer(berta["token"]),
     )
     assert refused.status_code == 403
-    assert refused.json()["type"] == "kein-realmmaster"
+    assert refused.json()["type"] == "not-realm-master"
     assert "ask" in refused.json()["message"].lower()
 
     service_voucher = participants.post(
@@ -317,7 +317,7 @@ def test_a_service_is_refused_team_operations_with_its_own_way_forward(
     for address in ("/team", "/team/purpose", "/peers", "/services"):
         answer = participants.get(address, headers=token)
         assert answer.status_code == 403, address
-        assert answer.json()["type"] == "falsches-token"
+        assert answer.json()["type"] == "wrong-token"
         assert "no team" in answer.json()["message"]
         assert "inbox" in answer.json()["message"], "its own addresses, not an instruction"
 
@@ -374,7 +374,7 @@ def test_a_token_the_installation_never_issued_is_no_token(participants: TestCli
     answer = participants.get("/inbox", headers=bearer("z" * 43))
 
     assert answer.status_code == 401
-    assert answer.json()["type"] == "kein-token"
+    assert answer.json()["type"] == "no-token"
     # And it names the one thing a caller in that position can check.
     assert "right installation" in answer.json()["message"]
 
@@ -389,7 +389,7 @@ def test_a_revoked_token_says_the_way_back_is_a_new_name(
     answer = participants.get("/inbox", headers=bearer(token))
 
     assert answer.status_code == 401
-    assert answer.json()["type"] == "token-entzogen"
+    assert answer.json()["type"] == "token-revoked"
     assert "new name" in answer.json()["message"]
 
 
@@ -487,7 +487,7 @@ def test_a_name_that_is_no_name_once_the_path_is_dropped_is_refused(
     answer = participants.get(f"/files/{deposited['file_id']}/..%5C..", headers=bearer(token))
 
     assert answer.status_code == 400
-    assert answer.json()["type"] == "ungültige-eingabe"
+    assert answer.json()["type"] == "invalid-input"
 
 
 def test_a_field_we_do_not_know_is_refused_rather_than_ignored(
@@ -504,7 +504,7 @@ def test_a_field_we_do_not_know_is_refused_rather_than_ignored(
     )
 
     assert answer.status_code == 400
-    assert answer.json()["type"] == "ungültige-eingabe"
+    assert answer.json()["type"] == "invalid-input"
 
 
 def test_an_attachment_carries_its_size_out_and_never_in(
