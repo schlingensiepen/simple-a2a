@@ -115,7 +115,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         The operation named in the refusal is the address being called, because that
         is what decides the text — not the place the check happens to live.
         """
-        with guard(f"{request.method} {request.scope['route'].path}"):
+        with guard(f"{request.method} {request.scope['route'].path_format}"):
             return access.as_operator(
                 access.authenticate(context, tokens.from_authorization(authorization))
             )
@@ -131,11 +131,11 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     )
 
     def realm_id(request: Request, realm: str) -> str:
-        with guard(f"{request.method} {request.scope['route'].path}"):
+        with guard(f"{request.method} {request.scope['route'].path_format}"):
             return access.realm_by_name(context, realm).id
 
     def team_id(request: Request, realm: str, team: str) -> tuple[str, str]:
-        with guard(f"{request.method} {request.scope['route'].path}"):
+        with guard(f"{request.method} {request.scope['route'].path_format}"):
             found = access.realm_by_name(context, realm)
             return found.id, access.team_by_name(context, found.id, team).id
 

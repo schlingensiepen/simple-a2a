@@ -161,7 +161,12 @@ def install_handlers(
         input, and it says so with the text of the operation it happened at.
         """
         route = request.scope.get("route")
-        operation_id = f"{request.method} {route.path}" if route is not None else ""
+        # `path_format`, not `path`: a parameter that takes the rest of the address is
+        # written `{file_name:path}` in the route and `{file_name}` everywhere else —
+        # in the description and in the texts — and the text is found by the latter.
+        operation_id = (
+            f"{request.method} {getattr(route, 'path_format', route.path)}" if route else ""
+        )
         field = _first_field(exc)
         try:
             rejection = register.rejection(

@@ -529,21 +529,13 @@ def invitation_used(i: Instance) -> Case:
     return None, "redeem", asked, ("POST", "/invitations/redeem", asked, None)
 
 
-def unknown_address(i: Instance) -> Case:
-    asked = {"file_id": UNKNOWN_ID, "file_name": "a/b.txt"}
-    return i.anna, "fetch", asked, ("GET", f"/files/{UNKNOWN_ID}/a%2Fb.txt", None, i.anna)
-
-
-#: Every rejection type of the catalogue that a tool can meet on this surface. Two
-#: are not here, and cannot be: `wrong-verb` — every tool calls its operation
-#: with the verb the description gives it, so no tool can send another — and
+#: Every rejection type of the catalogue that a tool can meet on this surface. Three
+#: are not here, and cannot be: `wrong-verb` and `unknown-address` — every tool calls
+#: an address of the description with the verb the description gives it, so no tool
+#: can send another (a slash in a file name once reached `unknown-address`; the name is
+#: now taken as the rest of the address and its directory parts dropped) — and
 #: `internal-error`, which needs the service itself to break, and no call from
-#: outside can arrange that. `unknown-address` *is* here, and **the answer is
-#: wrong**: a file name with a slash in it should be refused as invalid input, but
-#: the router decodes `%2F` before the application is asked and finds no address.
-#: The case is kept because what it proves — the refusal comes through unchanged —
-#: holds either way; the day the service answers correctly, it goes red on purpose
-#: and moves to `invalid-input`. It is a tripwire, not an endorsement.
+#: outside can arrange that.
 REFUSALS = {
     "no-token": no_token,
     "token-revoked": token_revoked,
@@ -555,7 +547,6 @@ REFUSALS = {
     "too-large": too_large,
     "invalid-input": invalid_input,
     "invitation-used": invitation_used,
-    "unknown-address": unknown_address,
 }
 
 

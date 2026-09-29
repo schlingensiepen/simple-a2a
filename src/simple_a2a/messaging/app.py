@@ -101,7 +101,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     http.serve_described_openapi(app)
 
     def here(request: Request) -> str:
-        return f"{request.method} {request.scope['route'].path}"
+        return f"{request.method} {request.scope['route'].path_format}"
 
     async def anyone(request: Request, authorization: http.Authorization = None) -> Caller:
         with guard(here(request)):
@@ -527,7 +527,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
             return {"file_id": file_id, "size": size, "media_type": said}
 
     @app.get(
-        "/files/{file_id}/{file_name}",
+        "/files/{file_id}/{file_name:path}",
         summary="Fetch a file. The name in the address is the name it is saved under.",
         response_class=Response,
         responses={

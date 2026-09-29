@@ -497,9 +497,10 @@ def test_a_path_in_the_saved_name_is_dropped_rather_than_followed(
 ) -> None:
     """The name goes into a response header, so what is left has to be a plain name.
 
-    A forward slash never reaches here — the router does not match one inside a path
-    segment, so such an address is simply not an address. A backslash does reach here,
-    and it is what a caller on another kind of machine sends.
+    Both kinds of slash reach here: the name is taken as the rest of the address, so
+    `reports/2026/numbers.csv` is not an address that does not exist but a name with
+    directory parts, and they are dropped the way they are in an attachment entry. A
+    backslash is what a caller on another kind of machine sends.
     """
     a_team(admin)
     token = joined(admin, participants, "Anna")
@@ -512,6 +513,12 @@ def test_a_path_in_the_saved_name_is_dropped_rather_than_followed(
     assert answer.status_code == 200
     assert "passwd" in answer.headers["content-disposition"]
     assert ".." not in answer.headers["content-disposition"]
+
+    forward = participants.get(
+        f"/files/{deposited['file_id']}/reports%2F2026%2Fnumbers.csv", headers=bearer(token)
+    )
+    assert forward.status_code == 200
+    assert 'filename="numbers.csv"' in forward.headers["content-disposition"]
 
 
 def test_a_name_that_is_no_name_once_the_path_is_dropped_is_refused(
@@ -526,6 +533,14 @@ def test_a_name_that_is_no_name_once_the_path_is_dropped_is_refused(
 
     assert answer.status_code == 400
     assert answer.json()["type"] == "invalid-input"
+
+    # Only directories, or nothing at all: the rest of the address is no name either,
+    # and it is refused in the catalogue's words rather than as an address that does
+    # not exist.
+    for rest in ("reports%2F2026%2F", ""):
+        answer = participants.get(f"/files/{deposited['file_id']}/{rest}", headers=bearer(token))
+        assert answer.status_code == 400, rest
+        assert answer.json()["type"] == "invalid-input", rest
 
 
 def test_a_field_we_do_not_know_is_refused_rather_than_ignored(

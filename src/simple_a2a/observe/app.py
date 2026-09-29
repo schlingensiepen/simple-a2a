@@ -73,8 +73,8 @@ FileId = Annotated[
 FileName = Annotated[
     str,
     Path(
-        description="The name to save the file under. Yours to choose; the media type is "
-        "derived from its extension so a browser can show what it can show.",
+        description="The name to save the file under. Yours to choose, and not a path: "
+        "directory parts in it are dropped rather than followed.",
         examples=["shopping-list.md"],
     ),
 ]
@@ -95,7 +95,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     http.serve_described_openapi(app)
 
     async def watcher(request: Request, authorization: http.Authorization = None) -> Observer:
-        with guard(f"{request.method} {request.scope['route'].path}"):
+        with guard(f"{request.method} {request.scope['route'].path_format}"):
             return access.as_observer(
                 access.authenticate(context, tokens.from_authorization(authorization))
             )
@@ -435,7 +435,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
             return http.prose(messages.body_of(context, caller, message_id), request)
 
     @app.get(
-        "/files/{file_id}/{file_name}",
+        "/files/{file_id}/{file_name:path}",
         summary="Fetch an attached file under a name of your choosing.",
         response_class=Response,
     )
