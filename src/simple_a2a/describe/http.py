@@ -102,6 +102,42 @@ def prose(text: str, request: Request) -> Response:
     return PlainTextResponse(text, media_type=MARKDOWN if wants_markdown else PLAIN)
 
 
+def wants_data(request: Request) -> bool:
+    """Whether the caller prefers JSON to prose, by its Accept header.
+
+    Only where an address offers both — the prose stays the answer for anybody who
+    does not ask: a missing header, `*/*`, or text listed first. Preference is the
+    quality value, then the order in the header, which is how most callers express
+    it without writing a quality at all.
+    """
+    best: tuple[float, int, bool] | None = None
+    for position, part in enumerate((request.headers.get("accept") or "").split(",")):
+        media, *parameters = (piece.strip() for piece in part.split(";"))
+        media = media.lower()
+        if media not in ("application/json", "text/markdown", "text/plain", "text/*"):
+            continue
+        quality = 1.0
+        for parameter in parameters:
+            if parameter.startswith("q="):
+                try:
+                    quality = float(parameter[2:])
+                except ValueError:
+                    quality = 0.0
+        if quality <= 0:
+            continue
+        candidate = (-quality, position, media == "application/json")
+        if best is None or candidate[:2] < best[:2]:
+            best = candidate
+    return bool(best and best[2])
+
+
+#: The two kinds of answer an address with both offers, for its description.
+PROSE_OR_DATA = {
+    "text/plain": {"schema": {"type": "string"}},
+    "text/markdown": {"schema": {"type": "string"}},
+}
+
+
 def identifier_of(route: APIRoute) -> str:
     """An operation's identifier in the description: the name it has in the code.
 

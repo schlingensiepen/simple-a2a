@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Path, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from simple_a2a.core import limits, tokens
 from simple_a2a.describe import http
@@ -165,11 +166,28 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
 
     @app.get(
         "/me",
-        summary="Who you are here, what you carry, and the two texts about you.",
+        summary="Who you are here, what you carry, and the two texts about you. Prose by "
+        "default; with `Accept: application/json`, the same facts as data.",
         response_class=Response,
+        responses={
+            200: {
+                "description": "Prose that branches to your texts — or, if you ask for "
+                "application/json first, your kind, name, team and right as data.",
+                "model": models.Me,
+                "content": http.PROSE_OR_DATA,
+            }
+        },
     )
     async def me(request: Request, caller: Caller = anyone_of) -> Response:
         with guard("GET /me"):
+            if http.wants_data(request):
+                kind = "peer" if isinstance(caller, Peer) else "service"
+                facts: dict[str, Any] = {"kind": kind, "name": caller.name}
+                if isinstance(caller, Peer):
+                    team = context.holdings.team(caller.realm_id, caller.team_id)
+                    facts["team_name"] = team.name if team else None
+                    facts["is_realm_master"] = caller.is_realm_master
+                return JSONResponse(facts, media_type=http.JSON)
             if isinstance(caller, Service):
                 located = context.holdings.service(caller.realm_id, caller.service_id)
                 text = (

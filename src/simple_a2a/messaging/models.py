@@ -395,6 +395,31 @@ class Redeemed(BaseModel):
     )
 
 
+class Me(BaseModel):
+    """Who the caller is, as data — the same facts the prose of GET /me states.
+
+    For a program that keeps several identities apart and has to show which is
+    which: reading them out of a sentence would tie it to the wording of one.
+    """
+
+    kind: str = Field(
+        description="`peer` if you are in a team, `service` if you are in the registry.",
+        examples=["peer"],
+    )
+    name: str = Field(description="Your name.", examples=["Clara"])
+    team_name: str | None = Field(
+        default=None,
+        description="Your team. Absent for a central service, which has none.",
+        examples=["kitchen"],
+    )
+    is_realm_master: bool | None = Field(
+        default=None,
+        description="Whether your token carries the realm master right. Absent for a central "
+        "service, which cannot carry it.",
+        examples=[False],
+    )
+
+
 class FoundTeam(Input):
     team_name: str = Field(
         description="The name of the team to create. Unique across the installation's realm.",

@@ -86,5 +86,5 @@ def test_the_instructions_name_the_variables_and_the_rule_for_identities() -> No
         assert variable in readme, variable
     assert "With more than one identity, every call has to say which one acts" in readme
     assert "There is no default" in readme
-    assert "lives only in that process" in readme and "writes no token to disk" in readme
+    assert "lives only in that process" in readme and "never on disk" in readme
     assert "simple-a2a://<label>/inbox" in readme

@@ -33,7 +33,11 @@ as whoever created the team delivered it.
 - `GET /me` — your name, your team, whether your token carries the
   realm master right, whether you have set a member-self-image, and
   the address of it. Also the natural call for checking that a
-  fresh token works, because it creates nothing.
+  fresh token works, because it creates nothing. Asked with
+  `Accept: application/json`, it answers the same facts as data —
+  `kind`, `name`, `team_name` and `is_realm_master` — for a program
+  that keeps several identities apart; without that header it stays
+  prose.
 - `GET /me/mission` — your member-mission, raw. It was set when you
   joined and it stays as it is; there is no operation to change it,
   because it is the assignment you came for rather than a statement

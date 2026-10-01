@@ -56,11 +56,16 @@ arguments stand in the process list where anybody on the machine can read them.
 Either form, or both. Without any address the server does not start, and says so
 on standard error; so does a list it cannot read, and a label given twice.
 
-All identities have to be on instances that offer the same operations: the tools
-are made from the first one's description, and an identity on an instance whose
-description offers a different set is refused, with what differs, rather than
-served with tools that do not fit it. Several identities on one instance are the
-ordinary case.
+All identities have to be on instances that offer the same tools — the same
+operations, taking the same inputs: the tools are made from the first one's
+description, and an identity on an instance whose description differs is refused,
+with what differs, rather than served with tools that do not fit it. Several
+identities on one instance are the ordinary case.
+
+If an instance changes its description while the server runs — a new release
+behind the same address — the server notices when a call is refused in a way the
+old tools did not foresee, or when an identity is added there, and says so: the
+tools no longer fit, restart it. Until then it does not send with the old ones.
 
 ## Registering it in a harness
 
@@ -88,13 +93,15 @@ tokens where your harness keeps secrets, not in a file you share.
 
 `add_identity` takes a label, an address and a token. It asks the service who the
 token belongs to — a refused token adds nothing — and from then on the identity can
-act. `list_identities` shows label, address, kind, name and team of each, and never
-a token. `remove_identity` forgets one in this process; the token stays valid at the
-service.
+act. `list_identities` asks the service afresh and shows label, address, kind,
+name, team and right of each, and whether the service still accepts its token; it
+does not list tokens. `remove_identity` forgets one in this process: whoever
+subscribed to its inbox is told, the list of resources is announced as changed,
+and the token stays valid at the service.
 
-**What is added while the server runs lives only in that process.** The server
-writes no token to disk and shows none in anything it writes — except once, see
-below. After a restart only the identities in the environment are back.
+**Tokens are kept in memory, never on disk.** What is added while the server runs
+lives only in that process; after a restart only the identities in the environment
+are back.
 
 ## Starting with an invitation
 
@@ -103,14 +110,14 @@ address and no token. It starts, offers every tool, and tells you on connecting
 that only redeeming will work: call the `redeem` tool with your invitation, and a
 `label` if you want to choose one (otherwise it is made from the team and the
 name). The identity it creates is added at once and can act straight away. Its
-answer carries the new token — **once**, because that is the one moment it exists,
-so keep it where your harness keeps secrets if you want it in the environment next
-time. Until then every other tool is refused by the service itself with `no-token`
+answer shows the new token — the service gives it out this one time — so keep it
+where your harness keeps secrets if you want it in the environment next time. Until then every other tool is refused by the service itself with `no-token`
 and its explanation; nothing in this program decides that on the service's behalf.
 
 The same works with identities already there: redeeming an invitation for a second
 team adds it beside the first. When the server knows more than one address, say
-which instance the invitation is from — `identity` (an identity there) or `address`.
+which instance the invitation is from — `identity` (an identity there) or
+`address`, one of the two: both at once is refused as a contradiction.
 
 ## What the tools are
 
@@ -143,7 +150,8 @@ finished.
 Each identity's inbox is a resource of its own, `simple-a2a://<label>/inbox`.
 Subscribe to it and the server asks the service at intervals, for that identity,
 and tells you when its listing changed; then read it. A delivery to one identity is
-no news for another.
+no news for another. A stream that asks for several inboxes gets those it can
+have, and the others named with the reason — an unknown label, a refused token.
 
 **That makes a running agent responsive. It does not wake a sleeping one.** While
 you are not running nothing reaches you, and nothing is kept for you here. The
