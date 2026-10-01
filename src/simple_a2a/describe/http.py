@@ -25,6 +25,7 @@ from fastapi import APIRouter, FastAPI, Header, Path, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.routing import APIRoute
+from starlette.routing import Match
 
 from simple_a2a.core.base_address import base_address
 from simple_a2a.core.clock import now_iso
@@ -116,6 +117,59 @@ def rejected(rejection: Rejection) -> JSONResponse:
     return JSONResponse(rejection.body(), status_code=rejection.status, media_type=JSON)
 
 
+def _placeholder_pattern(request: Request) -> str | None:
+    """The route whose shape this address has, if a placeholder made it match."""
+    for route in request.app.router.routes:
+        if not isinstance(route, APIRoute) or not route.param_convertors:
+            continue
+        match, _ = route.matches(request.scope)
+        if match is not Match.NONE:
+            return route.path_format
+    return None
+
+
+async def _read_instead(request: Request) -> tuple[int, bytes]:
+    """Ask this surface for the same address with GET, in-process, as the caller.
+
+    Read-only by construction: a GET here changes nothing. The body of the original
+    request is not passed on.
+    """
+    scope = {
+        key: request.scope[key]
+        for key in (
+            "type",
+            "asgi",
+            "http_version",
+            "scheme",
+            "server",
+            "client",
+            "root_path",
+            "path",
+            "raw_path",
+            "query_string",
+        )
+        if key in request.scope
+    }
+    scope["method"] = "GET"
+    scope["headers"] = [
+        (name, value)
+        for name, value in request.scope.get("headers", [])
+        if name not in (b"content-length", b"content-type", b"transfer-encoding")
+    ]
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    await request.app(scope, receive, send)
+    status = next((m["status"] for m in sent if m["type"] == "http.response.start"), 500)
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    return status, body
+
+
 def install_handlers(
     app: FastAPI, register: Register, *, surface_entry: Callable[[Request], str]
 ) -> None:
@@ -143,11 +197,29 @@ def install_handlers(
         )
 
     @app.exception_handler(405)
-    async def _wrong_verb(request: Request, exc: Exception) -> JSONResponse:
+    async def _wrong_verb(request: Request, exc: Exception) -> Response:
+        """Say "wrong verb" only about an address that exists.
+
+        The router decides by the *shape* of an address. `/services/{name}` makes
+        `/services/messages` look like an address — with `messages` as the name of a
+        service nobody has — and answering "it exists, but not with POST" sent an
+        agent looking for the right verb at an address that was never there. So where
+        a placeholder matched and the address can be read, it is read first, with the
+        caller's own credentials: if that read succeeds, the thing exists and the
+        verb was wrong; if not, its refusal is the true answer — "no service called
+        messages", or "no token" for a caller who could not have read it either.
+        """
         allowed = getattr(exc, "headers", {}).get("Allow") if hasattr(exc, "headers") else None
+        pattern = _placeholder_pattern(request)
+        if pattern and allowed and "GET" in allowed.replace(" ", "").split(","):
+            status, body = await _read_instead(request)
+            if status != 200:
+                return Response(body, status_code=status, media_type="application/json")
         message = "That address exists, but not with this method."
         if allowed:
             message += f" It takes: {allowed}."
+        if pattern:
+            message += f" It is the address {pattern}."
         message += " The entry at GET / lists every address of this surface."
         return rejected(Rejection(type=Type.WRONG_VERB, message=message))
 

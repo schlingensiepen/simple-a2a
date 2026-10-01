@@ -364,3 +364,51 @@ def test_nothing_on_this_surface_names_another(observation: TestClient) -> None:
     for text in texts:
         for giveaway in ("8251", "8252", "/inbox", "/outbox", "/realms", "/observer-tokens"):
             assert giveaway not in text, giveaway
+
+
+# ------------------------------------------------------------- a wrong verb, truly
+
+
+def test_a_wrong_verb_at_an_address_that_only_looks_like_one_is_not_a_wrong_verb(
+    admin: TestClient, participants: TestClient, observation: TestClient
+) -> None:
+    """The case an agent met: a participant address tried here.
+
+    `POST /services/messages` is how a participant writes to a central service. Here
+    it has the shape of `/services/{name}` with `messages` as a service nobody has,
+    and the answer used to be "that address exists, but not with POST" — which sent
+    the agent looking for the right verb at an address that was never there.
+    """
+    token = watching(admin)
+    anna = member(admin, participants, "Anna")
+    voucher = participants.post(
+        "/invitations/service",
+        json={"service_name": "weather", "display_name": "for weather"},
+        headers=bearer(anna["token"]),
+    ).json()["invitation"]
+    participants.post(
+        "/invitations/redeem", json={"invitation": voucher, "member_self_image": "Forecasts."}
+    )
+
+    nowhere = observation.post("/services/messages", json={}, headers=bearer(token))
+    somewhere = observation.post("/services/weather", json={}, headers=bearer(token))
+    unannounced = observation.post("/services/messages", json={})
+
+    # No such service: said as what it is.
+    assert nowhere.status_code == 404
+    assert nowhere.json()["type"] == "unknown-name"
+    # A service that exists: the verb really was wrong, and the shape is named.
+    assert somewhere.status_code == 405
+    assert somewhere.json()["type"] == "wrong-verb"
+    assert "/services/{name}" in somewhere.json()["message"]
+    # Without a token nothing here can be read, so nothing is said about what exists.
+    assert unannounced.status_code == 401
+    assert unannounced.json()["type"] == "no-token"
+
+
+def test_a_wrong_verb_at_a_fixed_address_stays_a_wrong_verb(observation: TestClient) -> None:
+    """No placeholder, nothing to look up: the address exists and the verb is wrong."""
+    answer = observation.post("/teams", json={})
+
+    assert answer.status_code == 405
+    assert answer.json()["type"] == "wrong-verb"
