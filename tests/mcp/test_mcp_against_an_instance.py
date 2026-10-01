@@ -110,11 +110,11 @@ class Instance:
         except subprocess.TimeoutExpired:
             self.process.kill()
 
-    def invitation(self, name: str) -> str:
+    def invitation(self, name: str, team: str = "kitchen") -> str:
         """An invitation from the operator, which carries the realm-master right."""
         status, answer = http(
             "POST",
-            f"{self.admin}/realms/household/teams/kitchen/invitations",
+            f"{self.admin}/realms/household/teams/{team}/invitations",
             {"member_name": name, "member_mission": f"{name} helps.", "display_name": name},
             ADMIN_SECRET,
         )
@@ -128,8 +128,8 @@ class Instance:
         assert status == 200, redeemed
         return redeemed["token"]
 
-    def member(self, name: str) -> str:
-        return self.redeem(self.invitation(name))
+    def member(self, name: str, team: str = "kitchen") -> str:
+        return self.redeem(self.invitation(name, team))
 
     def invited_by(self, inviter: str, name: str) -> str:
         """A member invited by a member: in the team, without the realm-master right."""
@@ -174,8 +174,16 @@ def instance(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Instance]:
             {"team_name": "kitchen", "team_purpose": "We cook."},
             ADMIN_SECRET,
         )
+        http(
+            "POST",
+            f"{running.admin}/realms/household/teams",
+            {"team_name": "garden", "team_purpose": "We grow."},
+            ADMIN_SECRET,
+        )
         running.anna = running.member("Anna")  # type: ignore[attr-defined]
         running.berta = running.member("Berta")  # type: ignore[attr-defined]
+        running.gustav = running.member("Gustav", "garden")  # type: ignore[attr-defined]
+        running.hilde = running.member("Hilde", "garden")  # type: ignore[attr-defined]
         yield running
     finally:
         running.stop()
@@ -264,29 +272,47 @@ class Program:
 
 
 def text_of(result: dict[str, Any]) -> str:
-    return "".join(part["text"] for part in result["content"] if part["type"] == "text")
+    """What the service answered: the last block. The first names the identity."""
+    return result["content"][-1]["text"]
+
+
+def identity_of(result: dict[str, Any]) -> str:
+    """The block a result begins with, naming the identity that acted."""
+    return result["content"][0]["text"]
 
 
 @pytest.fixture
 def programs(instance: Instance) -> Iterator[Any]:
-    """Start programs, with a token or without; at the end, none has let its token out."""
-    started: list[tuple[Program, str | None]] = []
+    """Start programs, with a token, with several, or without; none lets a token out.
 
-    def start(token: str | None, **extra: str) -> Program:
-        environment = {"A2A_MCP_ADDRESS": instance.base, **extra}
-        if token is not None:
-            environment["A2A_MCP_TOKEN"] = token
+    `identities` starts one with a list in the environment instead of the single
+    pair; every token in it is checked for at the end like the single one.
+    """
+    started: list[tuple[Program, list[str]]] = []
+
+    def start(
+        token: str | None, identities: list[dict[str, str]] | None = None, **extra: str
+    ) -> Program:
+        environment = dict(extra)
+        secrets = [token] if token is not None else []
+        if identities is not None:
+            environment["A2A_MCP_IDENTITIES"] = json.dumps(identities)
+            secrets += [entry["token"] for entry in identities]
+        else:
+            environment["A2A_MCP_ADDRESS"] = instance.base
+            if token is not None:
+                environment["A2A_MCP_TOKEN"] = token
         program = Program(environment)
-        started.append((program, token))
+        started.append((program, secrets))
         return program
 
     yield start
-    for program, token in started:
+    for program, secrets in started:
         stdout, stderr = program.close()
         assert program.process.returncode == 0, stderr
-        if token is not None:
-            assert token not in stdout, "the token left the program on standard output"
-            assert token not in stderr, "the token left the program on standard error"
+        for secret in secrets:
+            assert secret not in stdout, "a token left the program on standard output"
+            assert secret not in stderr, "a token left the program on standard error"
 
 
 # ------------------------------------------------------------------ the checks
@@ -307,6 +333,11 @@ SELF_DESCRIPTION = {
     ("GET", "/health"),
     ("GET", "/build"),
 }
+
+
+#: The tools that are this server's own, not operations of the service: they manage
+#: its identities. Named here, like the self-description, rather than derived.
+OWN_TOOLS = {"add_identity", "list_identities", "remove_identity"}
 
 
 def operations(document: dict[str, Any]) -> dict[str, str]:
@@ -343,11 +374,18 @@ def test_the_tools_are_exactly_the_operations(instance: Instance, programs: Any)
 
     tools = anna.ask("tools/list")["result"]["tools"]
 
-    assert mismatch(expected, tools) == (set(), set(), set())
+    made = [tool for tool in tools if tool["name"] not in OWN_TOOLS]
+    assert mismatch(expected, made) == (set(), set(), set())
+    assert {tool["name"] for tool in tools} - {tool["name"] for tool in made} == OWN_TOOLS
     for tool in tools:
         assert tool["inputSchema"]["type"] == "object"
         assert "$ref" not in json.dumps(tool["inputSchema"]), "a schema has to stand alone"
-    assert len(tools) == 28
+    for tool in made:
+        assert "identity" in tool["inputSchema"]["properties"], tool["name"]
+    for tool in tools:
+        if tool["name"] in OWN_TOOLS:
+            assert "Not an operation of the service" in tool["description"]
+    assert len(made) == 28
     assert "redeem" in expected, "redeeming is an operation, and so a tool"
 
 
@@ -404,7 +442,7 @@ def test_the_current_revision_is_spoken_per_request(instance: Instance, programs
     assert found["instructions"].startswith("This MCP server is not the contract.")
     assert found["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "simple-a2a-mcp"
     assert listed["resultType"] == "complete" and listed["ttlMs"] > 0
-    assert len(listed["tools"]) == 28
+    assert len(listed["tools"]) == 28 + len(OWN_TOOLS)
 
 
 def test_what_does_not_fit_the_protocol_is_answered_as_the_protocol_says(
@@ -625,14 +663,14 @@ def test_a_subscription_to_the_inbox_hears_a_delivery(instance: Instance, progra
     berta.initialize()
 
     resources = berta.ask("resources/list")["result"]["resources"]
-    assert berta.ask("resources/subscribe", {"uri": "simple-a2a://inbox"})["result"] == {}
+    assert berta.ask("resources/subscribe", {"uri": "simple-a2a://default/inbox"})["result"] == {}
     anna.call("send_to_peers", recipients=["Berta"], subject="Ping", body="Are you there?")
     heard = berta.wait(lambda m: m.get("method") == "notifications/resources/updated")
-    read = berta.ask("resources/read", {"uri": "simple-a2a://inbox"})["result"]
+    read = berta.ask("resources/read", {"uri": "simple-a2a://default/inbox"})["result"]
 
-    assert [r["uri"] for r in resources] == ["simple-a2a://inbox"]
+    assert [r["uri"] for r in resources] == ["simple-a2a://default/inbox"]
     assert "does not wake a sleeping one" in resources[0]["description"]
-    assert heard["params"]["uri"] == "simple-a2a://inbox"
+    assert heard["params"]["uri"] == "simple-a2a://default/inbox"
     assert json.loads(read["contents"][0]["text"])["entries"][0]["subject"] == "Ping"
 
 
@@ -650,7 +688,7 @@ def test_a_listening_stream_hears_a_delivery(instance: Instance, programs: Any) 
             "params": {
                 "_meta": META,
                 "notifications": {
-                    "resourceSubscriptions": ["simple-a2a://inbox"],
+                    "resourceSubscriptions": ["simple-a2a://default/inbox"],
                     "toolsListChanged": True,
                 },
             },
@@ -672,7 +710,7 @@ def test_a_listening_stream_hears_a_delivery(instance: Instance, programs: Any) 
     tag = "io.modelcontextprotocol/subscriptionId"
     assert acknowledged["params"]["_meta"][tag] == "listening"
     assert acknowledged["params"]["notifications"] == {
-        "resourceSubscriptions": ["simple-a2a://inbox"]
+        "resourceSubscriptions": ["simple-a2a://default/inbox"]
     }, "what is not honoured is left out of the acknowledgement"
     assert heard["params"]["_meta"][tag] == "listening"
 
@@ -711,45 +749,68 @@ def test_with_only_an_invitation_it_starts_and_redeeming_works(
 ) -> None:
     """The way an agent handed an invitation begins: start without a token, redeem.
 
-    The new token is in the redeem result, once — the one moment it exists — and
-    the second instance, started with it, works as that identity.
+    Before, every call is refused by the service itself. Redeeming adds the identity
+    to the same process, and its token is in that one answer — once, the one moment
+    it exists — so that a later start can carry it in the environment.
     """
     voucher = instance.invitation("Fiona")
     bare = programs(None)
 
     said = bare.initialize()["result"]["instructions"]
+    refused = bare.call("inbox")
     redeemed = bare.call("redeem", invitation=voucher)
     token = json.loads(text_of(redeemed))["token"]
-    refused = bare.call("inbox")
+    me = bare.call("me")
     second = programs(token)
     second.initialize()
-    me = second.call("me")
+    again = second.call("me")
 
     assert said.startswith("This MCP server is not the contract.")
-    assert "started without a token" in said and "`redeem`" in said
-    assert "A2A_MCP_TOKEN" in said
-    assert redeemed["isError"] is False
-    assert "".join(bare.lines).count(token) == 1, "the new token appears exactly once"
+    assert "no identity here yet" in said and "`redeem`" in said
     assert refused["isError"] is True and "type: no-token" in text_of(refused)
+    assert identity_of(refused).startswith("identity: none")
+    assert redeemed["isError"] is False
+    assert identity_of(redeemed).startswith("identity: kitchen-fiona — added by redeeming")
+    assert "".join(bare.lines).count(token) == 1, "the new token appears exactly once"
     assert me["isError"] is False and "Fiona" in text_of(me)
+    assert identity_of(me) == "identity: kitchen-fiona"
+    assert again["isError"] is False and "Fiona" in text_of(again)
 
 
-def test_without_a_token_a_subscription_is_refused_in_the_service_words(
+def test_without_an_identity_there_is_no_inbox_to_subscribe_to(
     instance: Instance, programs: Any
 ) -> None:
-    """Not a subscription that never hears anything: the refusal, as the service gave it."""
+    """An inbox belongs to an identity; before the first one there is none."""
     bare = programs(None)
     bare.initialize()
 
-    subscribed = bare.ask("resources/subscribe", {"uri": "simple-a2a://inbox"})
-    listened = bare.ask(
+    listed = bare.ask("resources/list")["result"]["resources"]
+    subscribed = bare.ask("resources/subscribe", {"uri": "simple-a2a://default/inbox"})
+
+    assert listed == []
+    assert subscribed["error"]["code"] == -32002
+    assert subscribed["error"]["data"]["identities"] == []
+
+
+def test_with_a_revoked_token_a_subscription_is_refused_in_the_service_words(
+    instance: Instance, programs: Any
+) -> None:
+    """Not a subscription that never hears anything: the refusal, as the service gave it."""
+    revoked = programs(instance.revoked("Gisela"))
+    revoked.initialize()
+
+    subscribed = revoked.ask("resources/subscribe", {"uri": "simple-a2a://default/inbox"})
+    listened = revoked.ask(
         "subscriptions/listen",
-        {"_meta": META, "notifications": {"resourceSubscriptions": ["simple-a2a://inbox"]}},
+        {
+            "_meta": META,
+            "notifications": {"resourceSubscriptions": ["simple-a2a://default/inbox"]},
+        },
     )
 
     for answer in (subscribed, listened):
-        assert answer["error"]["data"]["type"] == "no-token"
-        assert "type: no-token" in answer["error"]["message"]
+        assert answer["error"]["data"]["type"] == "token-revoked"
+        assert "type: token-revoked" in answer["error"]["message"]
 
 
 def test_an_open_stream_is_closed_with_its_result_when_the_input_ends(
@@ -764,7 +825,7 @@ def test_an_open_stream_is_closed_with_its_result_when_the_input_ends(
             "method": "subscriptions/listen",
             "params": {
                 "_meta": META,
-                "notifications": {"resourceSubscriptions": ["simple-a2a://inbox"]},
+                "notifications": {"resourceSubscriptions": ["simple-a2a://default/inbox"]},
             },
         }
     )
@@ -913,3 +974,281 @@ def test_the_running_instance_serves_the_package_of_the_tree(instance: Instance)
         served = answer.read()
 
     assert served == mcp_package.build_archive()
+
+
+# ------------------------------------------------------------------ several identities
+
+
+def two(instance: Instance) -> list[dict[str, str]]:
+    """Anna in the kitchen as `nord`, Gustav in the garden as `sued`, one instance."""
+    return [
+        {"label": "nord", "address": instance.base, "token": instance.anna},
+        {"label": "sued", "address": instance.base, "token": instance.gustav},
+    ]
+
+
+def newest(instance: Instance, token: str) -> dict[str, Any]:
+    status, answer = http("GET", f"{instance.base}/inbox", token=token)
+    assert status == 200, answer
+    return answer["entries"][0]
+
+
+def test_with_two_identities_a_call_has_to_name_one(instance: Instance, programs: Any) -> None:
+    """No default: the call is refused by this server, and it names what there is."""
+    both = programs(None, two(instance))
+    both.initialize()
+
+    refused = both.call("send_to_peers", recipients=["Berta"], subject="Who?", body="?")
+
+    assert refused["isError"] is True
+    said = text_of(refused)
+    assert "nord" in said and "sued" in said
+    assert "no default" in said
+
+
+def test_each_identity_sends_as_itself_and_the_result_says_which(
+    instance: Instance, programs: Any
+) -> None:
+    """The recipient sees the sender the token belongs to — in each team its own."""
+    both = programs(None, two(instance))
+    both.initialize()
+
+    from_nord = both.call(
+        "send_to_peers", identity="nord", recipients=["Berta"], subject="From nord", body="."
+    )
+    from_sued = both.call(
+        "send_to_peers", identity="SUED", recipients=["Hilde"], subject="From sued", body="."
+    )
+
+    assert identity_of(from_nord) == "identity: nord"
+    assert identity_of(from_sued) == "identity: sued", "labels compare without case"
+    at_berta = newest(instance, instance.berta)
+    at_hilde = newest(instance, instance.hilde)
+    assert (at_berta["sender_name"], at_berta["subject"]) == ("Anna", "From nord")
+    assert (at_hilde["sender_name"], at_hilde["subject"]) == ("Gustav", "From sued")
+
+
+def test_listing_the_identities_shows_who_and_never_a_token(
+    instance: Instance, programs: Any
+) -> None:
+    both = programs(None, two(instance))
+    both.initialize()
+
+    listed = both.call("list_identities")
+
+    shown = json.loads(text_of(listed))
+    assert [(i["label"], i["name"], i["team"], i["kind"]) for i in shown] == [
+        ("nord", "Anna", "kitchen", "peer"),
+        ("sued", "Gustav", "garden", "peer"),
+    ]
+    assert all(i["address"] == instance.base for i in shown)
+    assert instance.anna not in json.dumps(listed) and instance.gustav not in json.dumps(listed)
+
+
+def test_an_identity_added_at_runtime_works_and_makes_the_choice_required(
+    instance: Instance, programs: Any
+) -> None:
+    one = programs(instance.anna, A2A_MCP_LABEL="nord")
+    one.initialize()
+
+    alone = one.call("me")
+    added = one.call("add_identity", label="West", address=instance.base, token=instance.berta)
+    unnamed = one.call("me")
+    named = one.call("me", identity="west")
+    twice = one.call("add_identity", label="NORD", address=instance.base, token=instance.berta)
+    refused = one.call(
+        "add_identity", label="gone", address=instance.base, token=instance.revoked("Jonas")
+    )
+    listed = json.loads(text_of(one.call("list_identities")))
+
+    assert alone["isError"] is False and identity_of(alone) == "identity: nord"
+    assert added["isError"] is False and "Berta" in text_of(added)
+    assert "nothing was written to disk" in text_of(added)
+    assert unnamed["isError"] is True and "nord, West" in text_of(unnamed)
+    assert named["isError"] is False and "Berta" in text_of(named)
+    assert twice["isError"] is True and "already" in text_of(twice)
+    assert refused["isError"] is True and "type: token-revoked" in text_of(refused)
+    assert [i["label"] for i in listed] == ["nord", "West"], "a refused token adds nothing"
+
+
+def test_redeeming_adds_the_identity_under_its_label_and_shows_the_token_once(
+    instance: Instance, programs: Any
+) -> None:
+    one = programs(instance.anna, A2A_MCP_LABEL="nord")
+    one.initialize()
+    voucher = instance.invitation("Ines")
+
+    redeemed = one.call("redeem", invitation=voucher, label="ost")
+    token = json.loads(text_of(redeemed))["token"]
+    me = one.call("me", identity="ost")
+    listed = one.call("list_identities")
+
+    assert identity_of(redeemed).startswith("identity: ost — added by redeeming")
+    assert "".join(one.lines).count(token) == 1, "shown once, and never again"
+    assert me["isError"] is False and "Ines" in text_of(me)
+    assert token not in json.dumps(listed)
+    assert [i["label"] for i in json.loads(text_of(listed))] == ["nord", "ost"]
+
+
+def test_a_label_already_taken_is_refused_before_anything_is_redeemed(
+    instance: Instance, programs: Any
+) -> None:
+    """Otherwise a token would come into being with nowhere to keep it."""
+    one = programs(instance.anna, A2A_MCP_LABEL="nord")
+    one.initialize()
+    voucher = instance.invitation("Karl")
+
+    refused = one.call("redeem", invitation=voucher, label="Nord")
+    status, _ = http("POST", f"{instance.base}/invitations/redeem", {"invitation": voucher})
+
+    assert refused["isError"] is True and "Nothing was redeemed" in text_of(refused)
+    assert status == 200, "the invitation was still unused"
+
+
+class Differing:
+    """A stand-in instance whose description lacks one operation of the real one.
+
+    It serves the real instance's own description with `GET /team` taken out —
+    the honest way to have two instances that differ in nothing else.
+    """
+
+    def __init__(self, instance: Instance) -> None:
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        _, document = http("GET", f"{instance.base}/openapi.json")
+        del document["paths"]["/team"]
+        body = json.dumps(document).encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args: Any) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.address = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.server.shutdown()
+
+
+def test_an_identity_at_an_instance_with_other_operations_is_refused(
+    instance: Instance, programs: Any
+) -> None:
+    elsewhere = Differing(instance)
+    try:
+        one = programs(instance.anna)
+        one.initialize()
+        added = one.call("add_identity", label="far", address=elsewhere.address, token="t" * 43)
+        at_start = subprocess.run(
+            [sys.executable, str(PROGRAM)],
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "A2A_MCP_IDENTITIES": json.dumps(
+                    [
+                        *two(instance)[:1],
+                        {"label": "far", "address": elsewhere.address, "token": "u" * 43},
+                    ]
+                ),
+            },
+            input=b"",
+            capture_output=True,
+            timeout=PATIENCE,
+            check=False,
+        )
+    finally:
+        elsewhere.close()
+
+    assert added["isError"] is True
+    assert "different set of operations" in text_of(added) and "GET /team" in text_of(added)
+    assert at_start.returncode == 1
+    told = at_start.stderr.decode()
+    assert "identity far" in told and "different set of operations" in told
+    assert "u" * 43 not in told and instance.anna not in told
+
+
+def test_each_inbox_tells_only_about_its_own_identity(instance: Instance, programs: Any) -> None:
+    """One resource per identity, and a delivery to one is not news for the other."""
+    both = programs(None, two(instance), A2A_MCP_POLL_SECONDS="0.2")
+    both.initialize()
+
+    resources = [r["uri"] for r in both.ask("resources/list")["result"]["resources"]]
+    for uri in resources:
+        assert both.ask("resources/subscribe", {"uri": uri})["result"] == {}
+    http(
+        "POST",
+        f"{instance.base}/peers/messages",
+        {"recipients": ["Gustav"], "subject": "Only for sued", "body": "."},
+        instance.hilde,
+    )
+    first = both.wait(lambda m: m.get("method") == "notifications/resources/updated")
+    with pytest.raises(AssertionError):
+        both.wait(
+            lambda m: (
+                m.get("method") == "notifications/resources/updated"
+                and m["params"]["uri"] == "simple-a2a://nord/inbox"
+            ),
+            patience=1.5,
+        )
+    http(
+        "POST",
+        f"{instance.base}/peers/messages",
+        {"recipients": ["Anna"], "subject": "Only for nord", "body": "."},
+        instance.berta,
+    )
+    second = both.wait(lambda m: m.get("method") == "notifications/resources/updated")
+    read = both.ask("resources/read", {"uri": "simple-a2a://sued/inbox"})["result"]
+
+    assert resources == ["simple-a2a://nord/inbox", "simple-a2a://sued/inbox"]
+    assert first["params"]["uri"] == "simple-a2a://sued/inbox"
+    assert second["params"]["uri"] == "simple-a2a://nord/inbox"
+    entry = json.loads(read["contents"][0]["text"])["entries"][0]
+    assert entry["subject"] == "Only for sued"
+
+
+def test_the_handshake_explains_the_identities(instance: Instance, programs: Any) -> None:
+    said = programs(None, two(instance)).initialize()["result"]["instructions"]
+
+    assert said.startswith("This MCP server is not the contract.")
+    assert "nord (You are Anna, in kitchen" in said
+    assert "required" in said and "no default" in said
+    assert "A2A_MCP_IDENTITIES" in said and "add_identity" in said
+    assert "simple-a2a://<label>/inbox" in said
+    assert "writes no token to disk" in said
+
+
+@pytest.mark.parametrize(
+    ("listed", "told"),
+    [
+        ("not json", "is not JSON"),
+        ('[{"label": "a", "address": "http://x"}]', "has no token"),
+        (
+            json.dumps(
+                [
+                    {"label": "a", "address": "http://x", "token": "t"},
+                    {"label": "A", "address": "http://x", "token": "t"},
+                ]
+            ),
+            "given twice",
+        ),
+        ('[{"label": "with space", "address": "http://x", "token": "t"}]', "a label is"),
+    ],
+)
+def test_a_wrong_list_of_identities_stops_the_start_and_says_what(listed: str, told: str) -> None:
+    started = subprocess.run(
+        [sys.executable, str(PROGRAM)],
+        env={"PATH": os.environ.get("PATH", ""), "A2A_MCP_IDENTITIES": listed},
+        input=b"",
+        capture_output=True,
+        timeout=PATIENCE,
+        check=False,
+    )
+
+    assert started.returncode == 2
+    assert told in started.stderr.decode()

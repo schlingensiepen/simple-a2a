@@ -11,13 +11,16 @@ tool. Where a pipe cannot carry what an operation takes or gives, the tool is
 adapted by hand, and only there: a file is deposited **from a local path**, a file
 is fetched **to a local path**, and a raw text body is a plain string argument.
 
-**One process, one identity.** It is started with exactly one base address and at
-most one token, both from the environment rather than the command line, because
-arguments stand in the process list for anybody to read. Whoever holds two
-identities starts two processes; a parameter deciding which token to send with
-would be the one mistake this shape rules out. Started without a token it offers
-the same tools — and redeeming an invitation is the one that will work, which is
-how somebody who was handed an invitation rather than a token gets going.
+**One process, several identities.** An identity is a label, a base address and a
+token. They come from the environment rather than the command line, because
+arguments stand in the process list for anybody to read, or are added while the
+process runs — by a tool, or by redeeming an invitation, which adds the identity it
+creates. One process for all of them is the point: a process per identity would
+cost an agent with two teams twice what a ready-made server is meant to save.
+The price is the chance of acting as the wrong one, and it is paid openly: with more
+than one identity every call has to name the one that acts, there is no default,
+and every result says which one it was. Started with an address and no token at
+all, the same tools are there and redeeming is the one that will work.
 
 **Only the standard library.** Nothing else is installed next to an agent to run
 this, so nothing else can break it or be broken into through it. The price is that
@@ -32,10 +35,13 @@ and `subscriptions/listen` replaces `resources/subscribe`. Harnesses in use stil
 open with `initialize`. Both are answered, each in its own terms, because an MCP
 server that only one kind of harness can start is a third of an offer.
 
-**The inbox is a resource**, and a subscription to it makes this program ask the
-service at intervals and say when the listing changed. That makes a *running*
-agent responsive. It does not wake a sleeping one: nothing reaches an agent that
-is not running, and nothing is kept for it here.
+**Each identity's inbox is a resource**, and a subscription to it makes this
+program ask the service at intervals and say when the listing changed. That makes a
+*running* agent responsive. It does not wake a sleeping one: nothing reaches an
+agent that is not running, and nothing is kept for it here.
+
+**No token is written to disk** by this program, and none appears in anything it
+writes — except once: in the answer to the redeeming that created it.
 """
 
 from __future__ import annotations
@@ -65,6 +71,8 @@ VERSION = "0.1.0.dev0"
 #: and a client's settings in the same namespace would read like a ninth one.
 ADDRESS_VARIABLE = "A2A_MCP_ADDRESS"
 TOKEN_VARIABLE = "A2A_MCP_TOKEN"
+LABEL_VARIABLE = "A2A_MCP_LABEL"
+IDENTITIES_VARIABLE = "A2A_MCP_IDENTITIES"
 POLL_VARIABLE = "A2A_MCP_POLL_SECONDS"
 POLL_DEFAULT = 15.0
 
@@ -92,8 +100,23 @@ UNSUPPORTED_VERSION = -32022
 #: What "no such resource" was before 2026-07-28, when it became -32602.
 LEGACY_NOT_FOUND = -32002
 
-INBOX_URI = "simple-a2a://inbox"
 INBOX_PATH = "/inbox"
+#: One inbox per identity, named by its label.
+INBOX_URI = "simple-a2a://{label}/inbox"
+INBOX_URI_PATTERN = re.compile(r"simple-a2a://(?P<label>[^/]+)/inbox")
+
+#: What a label may be: short, and safe in a resource address. Compared without
+#: regard to case, so `Nord` and `nord` cannot both exist and be confused.
+LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}")
+LABEL_RULE = (
+    "a label is 1 to 32 letters, digits, dots, hyphens or underscores, starting with a "
+    "letter or digit"
+)
+#: The label of the identity given as the single pair, when A2A_MCP_LABEL says none.
+DEFAULT_LABEL = "default"
+
+#: The inputs this program adds to the tools that are made from the description.
+IDENTITY_INPUT = "identity"
 
 #: The one hour a listing of tools stays true for: they are fixed for the life of
 #: this process, and a restart is the only thing that changes them.
@@ -147,33 +170,73 @@ class StartRefused(Exception):
 
 
 @dataclass(frozen=True)
-class Settings:
+class Entry:
+    """One identity as the environment names it: a label, an address, a token."""
+
+    label: str
     address: str
-    #: None when started with an invitation rather than a token: then redeeming is
-    #: the one call that will succeed, and every other one is refused by the
-    #: service itself, in its own words.
-    token: str | None
+    token: str
+
+
+@dataclass(frozen=True)
+class Settings:
+    #: The identities given at start, in the order given.
+    entries: tuple[Entry, ...]
+    #: An address given without a token: the start of the way that begins with an
+    #: invitation. Until an identity exists, redeeming is the one call that works,
+    #: and every other is refused by the service itself, in its own words.
+    bare_address: str | None
     poll_seconds: float
 
     @classmethod
     def from_environment(cls, environment: dict[str, str] | os._Environ[str]) -> Settings:
-        """The address, or a refusal naming it; the token if there is one."""
+        """The identities, or a refusal naming the variable that is wrong.
+
+        Two forms, usable together: one pair in `A2A_MCP_ADDRESS` and
+        `A2A_MCP_TOKEN` (the token may be missing — then it is the address to
+        redeem at), and any number in `A2A_MCP_IDENTITIES`, a JSON list. Nothing in
+        a message here ever repeats a token.
+        """
         address = (environment.get(ADDRESS_VARIABLE) or "").strip()
         token = (environment.get(TOKEN_VARIABLE) or "").strip() or None
-        if not address:
+        listed = (environment.get(IDENTITIES_VARIABLE) or "").strip()
+        if not address and not listed:
             raise StartRefused(
-                f"{ADDRESS_VARIABLE} is not set. Start this program with {ADDRESS_VARIABLE} "
-                "set to the base address of the participant surface and, once you have one, "
-                f"{TOKEN_VARIABLE} set to the token of the one identity it acts as — both in "
-                "the environment, not on the command line.",
+                f"neither {ADDRESS_VARIABLE} nor {IDENTITIES_VARIABLE} is set. Start this "
+                f"program with {ADDRESS_VARIABLE} set to the base address of the participant "
+                f"surface (and {TOKEN_VARIABLE} to a token, once you have one), or with "
+                f"{IDENTITIES_VARIABLE} listing identities — in the environment, not on the "
+                "command line. README.md shows both.",
                 2,
             )
-        if not address.startswith(("http://", "https://")):
+        if token and not address:
             raise StartRefused(
-                f"{ADDRESS_VARIABLE} is not an address: it has to start with http:// or "
-                "https://, the way the entry of the participant surface names it.",
+                f"{TOKEN_VARIABLE} is set but {ADDRESS_VARIABLE} is not: a token belongs to "
+                "the address that issued it, and is worthless without it.",
                 2,
             )
+        entries: list[Entry] = []
+        bare: str | None = None
+        if address:
+            where = _address(address, ADDRESS_VARIABLE)
+            label = (environment.get(LABEL_VARIABLE) or "").strip() or DEFAULT_LABEL
+            if not LABEL.fullmatch(label):
+                raise StartRefused(f"{LABEL_VARIABLE}: {LABEL_RULE}", 2)
+            if token:
+                entries.append(Entry(label, where, token))
+            else:
+                bare = where
+        if listed:
+            entries += _listed(listed)
+        seen: set[str] = set()
+        for entry in entries:
+            if entry.label.lower() in seen:
+                raise StartRefused(
+                    f"the label {entry.label!r} is given twice. Labels are compared without "
+                    "regard to case and name one identity each.",
+                    2,
+                )
+            seen.add(entry.label.lower())
         raw_poll = (environment.get(POLL_VARIABLE) or "").strip()
         try:
             poll = float(raw_poll) if raw_poll else POLL_DEFAULT
@@ -185,7 +248,51 @@ class Settings:
                 f"{POLL_DEFAULT:g}.",
                 2,
             )
-        return cls(address=address.rstrip("/"), token=token, poll_seconds=poll)
+        return cls(entries=tuple(entries), bare_address=bare, poll_seconds=poll)
+
+
+def _address(value: str, where: str) -> str:
+    if not value.startswith(("http://", "https://")):
+        raise StartRefused(
+            f"{where} is not an address: it has to start with http:// or https://, the way "
+            "the entry of the participant surface names it.",
+            2,
+        )
+    return value.rstrip("/")
+
+
+def _listed(raw: str) -> list[Entry]:
+    """`A2A_MCP_IDENTITIES`: a JSON list of objects with label, address and token."""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise StartRefused(
+            f"{IDENTITIES_VARIABLE} is not JSON ({exc.msg}, at character {exc.pos}). It is "
+            'a list like [{"label": "nord", "address": "https://…", "token": "…"}].',
+            2,
+        ) from None
+    if not isinstance(parsed, list) or not parsed:
+        raise StartRefused(f"{IDENTITIES_VARIABLE} has to be a non-empty JSON list.", 2)
+    found = []
+    for number, item in enumerate(parsed, start=1):
+        where = f"{IDENTITIES_VARIABLE}, entry {number}"
+        if not isinstance(item, dict):
+            raise StartRefused(f"{where} is not an object.", 2)
+        missing = [
+            key
+            for key in ("label", "address", "token")
+            if not isinstance(item.get(key), str) or not item[key].strip()
+        ]
+        if missing:
+            raise StartRefused(f"{where} has no {', '.join(missing)}.", 2)
+        unknown = sorted(set(item) - {"label", "address", "token"})
+        if unknown:
+            raise StartRefused(f"{where} has fields this program does not know: {unknown}.", 2)
+        label = item["label"].strip()
+        if not LABEL.fullmatch(label):
+            raise StartRefused(f"{where}: {LABEL_RULE}", 2)
+        found.append(Entry(label, _address(item["address"].strip(), where), item["token"].strip()))
+    return found
 
 
 # ------------------------------------------------------------------ the service
@@ -636,53 +743,188 @@ def call(service: Service, operation: Operation, arguments: dict[str, Any]) -> d
         )
 
 
+# ------------------------------------------------------------------ identities
+
+
+@dataclass
+class Identity:
+    """One identity this server acts as: a label, an address, a token.
+
+    What it is called by the service — kind, name, team — is learned once, when
+    the identity is added, and only for display: nothing here decides anything on
+    it. The token is never shown.
+    """
+
+    label: str
+    address: str
+    token: str
+    kind: str | None = None
+    name: str | None = None
+    team: str | None = None
+    #: The service's own first line about this identity, or why there is none.
+    who: str | None = None
+
+    def __post_init__(self) -> None:
+        self.service = Service(self.address, self.token)
+
+    @property
+    def uri(self) -> str:
+        return INBOX_URI.format(label=self.label)
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "address": self.address,
+            "kind": self.kind,
+            "name": self.name,
+            "team": self.team,
+            "who": self.who,
+        }
+
+    def heard(self, answer: Answer) -> None:
+        """Take who this is from the service's answer to `GET /me`.
+
+        The first line of that answer says it — "You are Anna, in kitchen", or "…, a
+        central service". Read leniently: if the wording ever changes, the line is
+        still shown as it is, and only the separate fields stay empty.
+        """
+        text = answer.data.decode("utf-8", errors="replace").strip()
+        first = text.splitlines()[0].lstrip("#").strip() if text else ""
+        self.who = first or None
+        found = WHO.fullmatch(first)
+        if found:
+            self.name = found["name"]
+            self.team = found["team"]
+            self.kind = "peer" if found["team"] else "service"
+
+
+WHO = re.compile(r"You are (?P<name>.+?), (?:in (?P<team>.+)|a central service)")
+
+
+def derived_label(answer: dict[str, Any], taken: set[str]) -> str:
+    """A label for an identity made by redeeming, from its team and name."""
+    parts = [answer.get("team_name"), answer.get("name")]
+    raw = "-".join(str(part) for part in parts if part) or "identity"
+    base = re.sub(r"[^a-z0-9_.-]+", "-", raw.lower()).strip("-.")[:28] or "identity"
+    label, number = base, 2
+    while label.lower() in taken:
+        label, number = f"{base}-{number}", number + 1
+    return label
+
+
+def operation_set(tools: list[Operation]) -> set[tuple[str, str]]:
+    """What an instance offers, as verb and address: the thing two instances must share."""
+    return {(tool.method, tool.path) for tool in tools}
+
+
+def identity_inputs(tools: list[Operation]) -> None:
+    """Give every tool made from the description the inputs that choose an identity.
+
+    `identity` everywhere: with more than one identity it is required, and that is
+    checked at the call, because identities come and go while the tool list stays.
+    Redeeming also takes `label` for the identity it creates, and `address` for an
+    instance this server does not know yet.
+    """
+    extra = {
+        IDENTITY_INPUT: {
+            "type": "string",
+            "description": "Which identity acts: the label of one of this server's identities "
+            "(list_identities shows them). Required whenever there is more than one — there "
+            "is no default.",
+        }
+    }
+    for tool in tools:
+        added = dict(extra)
+        if not tool.takes_token:
+            added[IDENTITY_INPUT] = {
+                "type": "string",
+                "description": "Optional: the label of an identity on the instance to redeem "
+                "at. Needed only when this server knows more than one address.",
+            }
+            added["label"] = {
+                "type": "string",
+                "description": "The label for the identity this creates. "
+                + LABEL_RULE[0].upper()
+                + LABEL_RULE[1:]
+                + "; made from the team and name if left out.",
+            }
+            added["address"] = {
+                "type": "string",
+                "description": "Optional: the base address of the participant surface the "
+                "invitation is from, when it is not one this server knows already.",
+            }
+        for name, schema in added.items():
+            if name in tool.input_schema["properties"]:
+                raise DescriptionError(
+                    f"{tool.method} {tool.path} has an input {name!r} of its own, and this "
+                    "program needs that name to choose an identity"
+                )
+            tool.input_schema["properties"][name] = schema
+
+
+#: The tools that are not operations of the service but manage this server's
+#: identities. Named so a reader can tell them from the generated ones.
+OWN_TOOLS: dict[str, dict[str, Any]] = {
+    "list_identities": {
+        "description": "The identities this server acts as: label, address, kind, name, team, "
+        "and the service's own line about each. Never a token. Not an operation of the "
+        "service — it describes this server.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    "add_identity": {
+        "description": "Add an identity from a label, an address and a token. The token is "
+        "checked by asking the service who it belongs to; a refused token adds nothing. The "
+        "address must offer the same operations as the instance these tools were made from. "
+        "Added identities live only in this process: nothing is written to disk, and after "
+        "a restart only the identities in the environment are back. Not an operation of the "
+        "service.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": LABEL_RULE[0].upper() + LABEL_RULE[1:]},
+                "address": {
+                    "type": "string",
+                    "description": "The base address of the participant surface.",
+                },
+                "token": {"type": "string", "description": "The token of that identity."},
+            },
+            "required": ["label", "address", "token"],
+            "additionalProperties": False,
+        },
+    },
+    "remove_identity": {
+        "description": "Forget an identity in this process. The service is not told: the "
+        "token stays valid there. Not an operation of the service.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"label": {"type": "string", "description": "The label to forget."}},
+            "required": ["label"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def _with_identity(result: dict[str, Any], line: str) -> dict[str, Any]:
+    """Every result says first which identity acted — a block of its own."""
+    result["content"].insert(0, {"type": "text", "text": line})
+    return result
+
+
 # ------------------------------------------------------------------ the server
 
 
-def instructions(address: str, poll_seconds: float, *, has_token: bool, redeem: str) -> str:
-    """What a harness is told first. The first sentence is the one that matters."""
-    without = (
-        f"This instance was started without a token, so only redeeming will work: call "
-        f"`{redeem}` with the invitation you were given. It answers with your token, "
-        f"once — that is the one moment it exists. Then start an instance of this server "
-        f"with {TOKEN_VARIABLE} set to that token and work there; every other tool here "
-        f"is refused by the service with `no-token`.\n\n"
-    )
-    return (
-        f"This MCP server is not the contract. The contract is the self-description of "
-        f"the simple-a2a participant surface at {address} — its entry at {address}/, the "
-        f"guide at {address}/guide and the interface description at "
-        f"{address}/openapi.json. Read the guide before your first call: it says what "
-        f"goes wrong otherwise. Every tool here was generated from that interface "
-        f"description when this server started, one per operation; where a tool and the "
-        f"guide seem to disagree, the guide is right.\n\n"
-        + ("" if has_token else without)
-        + f"This server acts as exactly one identity, the one whose token it was started "
-        f"with. To act as another, redeem its invitation with `{redeem}` and start a "
-        f"second instance with the token that gives you — one instance per identity.\n\n"
-        f"Your inbox is the resource {INBOX_URI}. Subscribe to it and this server asks "
-        f"the service every {poll_seconds:g} seconds and tells you when it changed. That "
-        f"makes a running agent responsive; it does not wake a sleeping one. While you "
-        f"are not running nothing reaches you, so read your inbox whenever you resume.\n\n"
-        f"Before you exchange a file, agree with the other agent whether you run on the "
-        f"same machine; if you do, send a path in the body of a message instead of "
-        f"depositing the file.\n\n"
-        f"Calls are handled one after the other: a slow call delays the next, a "
-        f"cancellation included."
-    )
-
-
-def inbox_resource(poll_seconds: float) -> dict[str, Any]:
+def inbox_resource(identity: Identity, poll_seconds: float) -> dict[str, Any]:
     return {
-        "uri": INBOX_URI,
-        "name": "inbox",
-        "title": "Your inbox",
+        "uri": identity.uri,
+        "name": f"inbox of {identity.label}",
+        "title": f"Inbox of {identity.label}",
         "description": (
-            f"What arrived for this identity, newest first, envelopes only: the answer of "
-            f"GET {INBOX_PATH} at the moment you read it. Subscribe and this server asks "
-            f"the service every {poll_seconds:g} seconds and tells you when the listing "
-            f"changed; then read it. That makes a running agent responsive. It does not "
-            f"wake a sleeping one — while you are not running nothing reaches you and "
+            f"What arrived for the identity {identity.label}, newest first, envelopes only: "
+            f"the answer of GET {INBOX_PATH} at the moment you read it. Subscribe and this "
+            f"server asks the service every {poll_seconds:g} seconds and tells you when the "
+            f"listing changed; then read it. That makes a running agent responsive. It does "
+            f"not wake a sleeping one — while you are not running nothing reaches you and "
             f"nothing is kept for you here, so read your inbox whenever you resume."
         ),
         "mimeType": "application/json",
@@ -712,14 +954,15 @@ class Output:
 
 
 class Watch:
-    """Asking the service about the inbox, for as long as anybody listens.
+    """Asking the service about one identity's inbox, for as long as anybody listens.
 
     The baseline is taken when the first subscription arrives, before it is
     answered: a message that arrives right after the answer then counts as a
     change instead of disappearing into the first look.
     """
 
-    def __init__(self, service: Service, interval: float, output: Output) -> None:
+    def __init__(self, uri: str, service: Service, interval: float, output: Output) -> None:
+        self._uri = uri
         self._service = service
         self._interval = interval
         self._output = output
@@ -734,10 +977,10 @@ class Watch:
         try:
             answer = self._service.request("GET", INBOX_PATH)
         except Unreachable as failed:
-            log(f"looking at the inbox failed: {failed}")
+            log(f"looking at {self._uri} failed: {failed}")
             return None
         if answer.status != 200:
-            log(f"looking at the inbox was refused: {refusal_text(answer)}")
+            log(f"looking at {self._uri} was refused: {refusal_text(answer)}")
             return None
         return hashlib.sha256(answer.data).hexdigest()
 
@@ -770,13 +1013,10 @@ class Watch:
             self._streams.add(subscription)
             self._ensure_running()
 
-    def close_stream(self, subscription: Any) -> bool:
+    def close_stream(self, subscription: Any) -> None:
         with self._lock:
-            if subscription not in self._streams:
-                return False
             self._streams.discard(subscription)
             self._stop_if_idle()
-            return True
 
     def stop(self) -> None:
         self._stop.set()
@@ -796,7 +1036,7 @@ class Watch:
                         {
                             "jsonrpc": "2.0",
                             "method": "notifications/resources/updated",
-                            "params": {"uri": INBOX_URI},
+                            "params": {"uri": self._uri},
                         }
                     )
                 for subscription in sorted(self._streams, key=str):
@@ -806,33 +1046,131 @@ class Watch:
                             "method": "notifications/resources/updated",
                             "params": {
                                 "_meta": {META_SUBSCRIPTION: subscription},
-                                "uri": INBOX_URI,
+                                "uri": self._uri,
                             },
                         }
                     )
 
 
 class Server:
-    """The protocol, both eras, over one pair of streams."""
+    """The protocol, both eras, over one pair of streams, for any number of identities."""
 
-    def __init__(self, settings: Settings, service: Service, tools: list[Operation]) -> None:
+    def __init__(self, settings: Settings, tools: list[Operation], first_address: str) -> None:
         self.settings = settings
-        self.service = service
         self.tools = {operation.name: operation for operation in tools}
         self.order = [operation.name for operation in tools]
+        for name in OWN_TOOLS:
+            if name in self.tools:
+                raise DescriptionError(
+                    f"an operation is called {name!r}, like a tool of this server"
+                )
+        self.offered = operation_set(tools)
+        self.first_address = first_address
+        #: Addresses whose description was compared and found to offer the same.
+        self.matching: set[str] = {first_address}
+        self.identities: list[Identity] = []
         self.negotiated: str | None = None
         self.output: Output | None = None
-        self.watch: Watch | None = None
+        self.watches: dict[str, Watch] = {}
         #: Open `subscriptions/listen` requests, answered only when they end.
         self.listening: list[Any] = []
+        #: Tokens to be kept out of every later output, once the one answer that
+        #: carries them has gone out.
+        self.pending_secrets: list[str] = []
         redeeming = [op.name for op in tools if not op.takes_token]
         self.redeem = redeeming[0] if redeeming else "the tool that redeems an invitation"
+
+    # -- identities ------------------------------------------------------
+
+    def find(self, label: Any) -> Identity | None:
+        if not isinstance(label, str):
+            return None
+        for identity in self.identities:
+            if identity.label.lower() == label.lower():
+                return identity
+        return None
+
+    def labels(self) -> str:
+        return ", ".join(identity.label for identity in self.identities) or "none yet"
+
+    def addresses(self) -> list[str]:
+        known = [identity.address for identity in self.identities]
+        if self.settings.bare_address:
+            known.insert(0, self.settings.bare_address)
+        return list(dict.fromkeys(known))
+
+    def different(self, address: str) -> str | None:
+        """Why the instance at `address` cannot be served with these tools, or None.
+
+        Compared by the operations it offers, verb and address — not by the bytes of
+        its description, which differ in a limit or a build without anything a tool
+        would do differently.
+        """
+        if address in self.matching:
+            return None
+        try:
+            document = Service(address, None).description()
+            theirs = operation_set(operations_of(document))
+        except (Unreachable, DescriptionError) as failed:
+            return (
+                f"its interface description at {address}/openapi.json could not be read: {failed}"
+            )
+        if theirs != self.offered:
+            missing = sorted(f"{verb} {path}" for verb, path in self.offered - theirs)
+            extra = sorted(f"{verb} {path}" for verb, path in theirs - self.offered)
+            return (
+                f"the instance at {address} offers a different set of operations than the one "
+                f"these tools were made from ({self.first_address}) — it lacks "
+                f"{', '.join(missing) or 'nothing'} and adds {', '.join(extra) or 'nothing'}. "
+                "Its identities would be served with tools that do not fit it. Start a "
+                "separate MCP server for that instance."
+            )
+        self.matching.add(address)
+        return None
+
+    def lookup(self, identity: Identity) -> Answer | None:
+        """Ask the service who the identity is. None if it could not be reached."""
+        try:
+            answer = identity.service.request("GET", "/me")
+        except Unreachable as failed:
+            identity.who = f"not asked: the service could not be reached ({failed})"
+            return None
+        if answer.status == 200:
+            identity.heard(answer)
+        else:
+            identity.who = f"the service refused this token: {_refusal_data(answer).get('type')}"
+        return answer
+
+    def add(self, identity: Identity) -> None:
+        if identity.token not in _SECRET:
+            _SECRET.append(identity.token)
+        self.identities.append(identity)
+
+    def choose(self, chosen: Any) -> tuple[Identity | None, dict[str, Any] | None]:
+        """The identity a call acts as, or the refusal that says to name one."""
+        if chosen is not None:
+            identity = self.find(chosen)
+            if identity is None:
+                return None, _text_result(
+                    f"There is no identity {chosen!r} here. There are: {self.labels()}.",
+                    error=True,
+                )
+            return identity, None
+        if len(self.identities) == 1:
+            return self.identities[0], None
+        if len(self.identities) > 1:
+            return None, _text_result(
+                f"This server acts as {len(self.identities)} identities, so every call has to "
+                f"say which one acts: give `identity` as one of {self.labels()}. There is no "
+                "default, on purpose — a message sent as the wrong identity cannot be unsent.",
+                error=True,
+            )
+        return None, None
 
     # -- the loop --------------------------------------------------------
 
     def run(self, source: Any, sink: Any) -> None:
         self.output = Output(sink)
-        self.watch = Watch(self.service, self.settings.poll_seconds, self.output)
         try:
             for raw in source:
                 line = raw.decode("utf-8", errors="replace").strip()
@@ -853,7 +1191,8 @@ class Server:
                     }
                 )
         finally:
-            self.watch.stop()
+            for watch in self.watches.values():
+                watch.stop()
 
     def handle_line(self, line: str) -> None:
         assert self.output is not None
@@ -885,9 +1224,12 @@ class Server:
             return
         if result is not None:
             self.output.send({"jsonrpc": "2.0", "id": identifier, "result": result})
+        # A token redeemed in this call has now been shown, once; from here on it is
+        # kept out of everything like any other.
+        _SECRET.extend(self.pending_secrets)
+        self.pending_secrets.clear()
 
     def notification(self, method: str, params: Any) -> None:
-        assert self.watch is not None
         if method == "notifications/cancelled" and isinstance(params, dict):
             # Ends a listening stream, with no further message for it. A plain request
             # is answered before the next line is read, so there is nothing else
@@ -895,7 +1237,8 @@ class Server:
             subscription = params.get("requestId")
             if subscription in self.listening:
                 self.listening.remove(subscription)
-            self.watch.close_stream(subscription)
+            for watch in self.watches.values():
+                watch.close_stream(subscription)
 
     # -- dispatch --------------------------------------------------------
 
@@ -927,9 +1270,10 @@ class Server:
             return result
         result.setdefault("resultType", "complete")
         result.setdefault("_meta", {})[META_SERVER] = {"name": NAME, "version": VERSION}
-        if method in ("tools/list", "resources/list"):
+        if method == "tools/list":
             result.update(ttlMs=LIST_TTL_MS, cacheScope="private")
-        elif method == "resources/read":
+        elif method in ("resources/list", "resources/read"):
+            # Identities come and go at runtime, and an inbox changes all the time.
             result.update(ttlMs=0, cacheScope="private")
         return result
 
@@ -962,11 +1306,58 @@ class Server:
     # -- the methods -----------------------------------------------------
 
     def instructions(self) -> str:
-        return instructions(
-            self.settings.address,
-            self.settings.poll_seconds,
-            has_token=self.settings.token is not None,
-            redeem=self.redeem,
+        """What a harness is told first. The first sentence is the one that matters."""
+        places = "; ".join(
+            f"{a} — its entry at {a}/, the guide at {a}/guide and the interface description "
+            f"at {a}/openapi.json"
+            for a in self.addresses()
+        )
+        if not self.identities:
+            who = (
+                f"There is no identity here yet, so only redeeming will work: call "
+                f"`{self.redeem}` with the invitation you were given, and a `label` for it if "
+                f"you like. The identity it creates is added to this server at once, and its "
+                f"token is in that one answer — shown once, because that is the one moment it "
+                f"exists, so keep it where you keep secrets. Until then every other tool is "
+                f"refused by the service with `no-token`."
+            )
+        else:
+            listed = ", ".join(
+                f"{i.label} ({i.who or 'not known who'}, at {i.address})" for i in self.identities
+            )
+            rule = (
+                "Every tool takes `identity`, the label of the identity that acts, and with "
+                "more than one identity it is required: there is no default, so name it every "
+                "time — a message sent as the wrong identity cannot be unsent."
+                if len(self.identities) > 1
+                else "Every tool takes `identity`, the label of the identity that acts; with "
+                "one identity it may be left out, and as soon as there is a second it is "
+                "required."
+            )
+            who = f"This server acts as these identities: {listed}. {rule}"
+        return (
+            f"This MCP server is not the contract. The contract is the self-description of "
+            f"the simple-a2a participant surface it talks to: {places}. Read the guide "
+            f"before your first call: it says what goes wrong otherwise. Every tool here was "
+            f"generated from that interface description when this server started, one per "
+            f"operation; where a tool and the guide seem to disagree, the guide is right.\n\n"
+            f"{who} Every result names, in its first line, the identity that acted.\n\n"
+            f"Identities come from the environment at start — {IDENTITIES_VARIABLE} as a "
+            f"JSON list of label, address and token, or one pair in {ADDRESS_VARIABLE} and "
+            f"{TOKEN_VARIABLE} — or at runtime: `add_identity` adds one, `list_identities` "
+            f"shows them without their tokens, `remove_identity` forgets one, and "
+            f"`{self.redeem}` adds the identity it creates. What is added at runtime lives "
+            f"only in this process: this server writes no token to disk.\n\n"
+            f"Each identity's inbox is a resource of its own, simple-a2a://<label>/inbox. "
+            f"Subscribe to it and this server asks the service every "
+            f"{self.settings.poll_seconds:g} seconds and tells you when it changed. That makes "
+            f"a running agent responsive; it does not wake a sleeping one. While you are not "
+            f"running nothing reaches you, so read your inboxes whenever you resume.\n\n"
+            f"Before you exchange a file, agree with the other agent whether you run on the "
+            f"same machine; if you do, send a path in the body of a message instead of "
+            f"depositing the file.\n\n"
+            f"Calls are handled one after the other: a slow call delays the next, a "
+            f"cancellation included."
         )
 
     def capabilities(self) -> dict[str, Any]:
@@ -987,90 +1378,269 @@ class Server:
             "supportedVersions": list(SUPPORTED),
             "capabilities": self.capabilities(),
             "instructions": self.instructions(),
-            "ttlMs": LIST_TTL_MS,
+            "ttlMs": 0,
             "cacheScope": "private",
         }
 
     def tools_list(self) -> dict[str, Any]:
-        return {"tools": [self.tools[name].tool() for name in self.order]}
+        made = [self.tools[name].tool() for name in self.order]
+        own = [{"name": name, **tool} for name, tool in OWN_TOOLS.items()]
+        return {"tools": made + own}
 
     def tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")
-        operation = self.tools.get(name) if isinstance(name, str) else None
-        if operation is None:
-            raise ProtocolError(INVALID_PARAMS, f"There is no tool {name!r} here.")
         arguments = params.get("arguments") or {}
         if not isinstance(arguments, dict):
             raise ProtocolError(INVALID_PARAMS, "arguments has to be an object.")
-        return call(self.service, operation, arguments)
+        arguments = dict(arguments)
+        if name in OWN_TOOLS:
+            return getattr(self, name)(arguments)
+        operation = self.tools.get(name) if isinstance(name, str) else None
+        if operation is None:
+            raise ProtocolError(INVALID_PARAMS, f"There is no tool {name!r} here.")
+        chosen = arguments.pop(IDENTITY_INPUT, None)
+        if not operation.takes_token:
+            return self.redeeming(operation, arguments, chosen)
+        identity, refused = self.choose(chosen)
+        if refused is not None:
+            return refused
+        if identity is None:
+            # No identity yet: the call goes out without a token, and the service says
+            # what that means in its own words.
+            service = Service(self.addresses()[0], None)
+            return _with_identity(
+                call(service, operation, arguments), "identity: none — sent without a token"
+            )
+        return _with_identity(
+            call(identity.service, operation, arguments), f"identity: {identity.label}"
+        )
+
+    def redeeming(
+        self, operation: Operation, arguments: dict[str, Any], chosen: Any
+    ) -> dict[str, Any]:
+        """Redeem an invitation, and add the identity it creates under a label.
+
+        The label is checked before the service is asked: a token that came into
+        being and then could not be kept anywhere would be lost the moment it was
+        made.
+        """
+        label = arguments.pop("label", None)
+        given = arguments.pop("address", None)
+        if label is not None and (not isinstance(label, str) or not LABEL.fullmatch(label)):
+            return _text_result(f"`label`: {LABEL_RULE}. Nothing was redeemed.", error=True)
+        if label is not None and self.find(label) is not None:
+            return _text_result(
+                f"There is already an identity {label!r} here (labels are compared without "
+                f"regard to case). Choose another `label`. Nothing was redeemed.",
+                error=True,
+            )
+        if given is not None:
+            if not isinstance(given, str) or not given.startswith(("http://", "https://")):
+                return _text_result("`address` has to start with http:// or https://.", error=True)
+            address = given.rstrip("/")
+            problem = self.different(address)
+            if problem:
+                return _text_result(f"Nothing was redeemed: {problem}", error=True)
+        elif chosen is not None:
+            identity = self.find(chosen)
+            if identity is None:
+                return _text_result(
+                    f"There is no identity {chosen!r} here. There are: {self.labels()}.",
+                    error=True,
+                )
+            address = identity.address
+        else:
+            known = self.addresses()
+            if len(known) != 1:
+                return _text_result(
+                    "This server knows more than one address, so say which instance the "
+                    "invitation is from: `identity` (the label of an identity there) or "
+                    f"`address`. It knows: {', '.join(known)}.",
+                    error=True,
+                )
+            address = known[0]
+        result = call(Service(address, None), operation, arguments)
+        if result.get("isError"):
+            return _with_identity(result, "identity: none added — the service refused, below")
+        try:
+            answer = json.loads(result["content"][0]["text"])
+            token = answer["token"]
+        except (json.JSONDecodeError, KeyError, TypeError, IndexError):
+            return _with_identity(result, "identity: none added — the answer carried no token")
+        made = Identity(
+            label=label or derived_label(answer, {i.label.lower() for i in self.identities}),
+            address=address,
+            token=token,
+            kind=answer.get("kind"),
+            name=answer.get("name"),
+            team=answer.get("team_name"),
+        )
+        made.who = f"{made.name}, in {made.team}" if made.team else f"{made.name}, a service"
+        self.identities.append(made)
+        self.pending_secrets.append(token)
+        return _with_identity(
+            result,
+            f"identity: {made.label} — added by redeeming. Its token is in the answer below, "
+            "shown this once: keep it where you keep secrets. This server keeps it only while "
+            "it runs.",
+        )
+
+    # -- the tools of this server ----------------------------------------
+
+    def list_identities(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if arguments:
+            return _text_result("list_identities takes no arguments.", error=True)
+        listed = [identity.public() for identity in self.identities]
+        return _text_result(json.dumps(listed, ensure_ascii=False, indent=2))
+
+    def add_identity(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        label, address, token = (arguments.get(k) for k in ("label", "address", "token"))
+        unknown = sorted(set(arguments) - {"label", "address", "token"})
+        if isinstance(token, str) and token.strip() and token.strip() not in _SECRET:
+            # Kept out of every output from this moment, whatever happens next.
+            _SECRET.append(token.strip())
+        if unknown:
+            return _text_result(f"add_identity does not take {', '.join(unknown)}.", error=True)
+        if not all(isinstance(value, str) and value.strip() for value in (label, address, token)):
+            return _text_result("add_identity needs `label`, `address` and `token`.", error=True)
+        label, address, token = label.strip(), address.strip().rstrip("/"), token.strip()
+        if not LABEL.fullmatch(label):
+            return _text_result(f"`label`: {LABEL_RULE}.", error=True)
+        if self.find(label) is not None:
+            return _text_result(
+                f"There is already an identity {label!r} here (labels are compared without "
+                f"regard to case). There are: {self.labels()}.",
+                error=True,
+            )
+        if not address.startswith(("http://", "https://")):
+            return _text_result("`address` has to start with http:// or https://.", error=True)
+        problem = self.different(address)
+        if problem:
+            return _text_result(f"Nothing was added: {problem}", error=True)
+        identity = Identity(label=label, address=address, token=token)
+        answer = self.lookup(identity)
+        if answer is None:
+            return _text_result(f"Nothing was added: {identity.who}.", error=True)
+        if answer.status != 200:
+            return _text_result(
+                f"Nothing was added: the service refused the token.\n\n{refusal_text(answer)}",
+                error=True,
+            )
+        self.add(identity)
+        rule = (
+            f" There are now {len(self.identities)} identities, so every call has to name one "
+            "with `identity`."
+            if len(self.identities) > 1
+            else ""
+        )
+        return _text_result(
+            f"identity: {label} — added: {identity.who}. It lives only in this process; nothing "
+            f"was written to disk.{rule}"
+        )
+
+    def remove_identity(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        identity = self.find(arguments.get("label"))
+        if identity is None:
+            return _text_result(
+                f"There is no identity {arguments.get('label')!r} here. There are: "
+                f"{self.labels()}.",
+                error=True,
+            )
+        self.identities.remove(identity)
+        watch = self.watches.pop(identity.label.lower(), None)
+        if watch is not None:
+            watch.stop()
+        return _text_result(
+            f"identity: {identity.label} — forgotten in this process. Its token is still valid "
+            "at the service."
+        )
+
+    # -- resources -------------------------------------------------------
 
     def resources_list(self) -> dict[str, Any]:
-        return {"resources": [inbox_resource(self.settings.poll_seconds)]}
+        return {
+            "resources": [
+                inbox_resource(identity, self.settings.poll_seconds) for identity in self.identities
+            ]
+        }
 
-    def _known(self, params: dict[str, Any], era: str) -> None:
-        if params.get("uri") != INBOX_URI:
+    def _owner(self, params: dict[str, Any], era: str) -> Identity:
+        found = INBOX_URI_PATTERN.fullmatch(str(params.get("uri") or ""))
+        identity = self.find(found["label"]) if found else None
+        if identity is None:
             raise ProtocolError(
                 INVALID_PARAMS if era == "modern" else LEGACY_NOT_FOUND,
                 "Resource not found",
-                {"uri": params.get("uri")},
+                {"uri": params.get("uri"), "identities": [i.label for i in self.identities]},
             )
+        return identity
 
-    def _inbox(self) -> Answer:
+    def _watch(self, identity: Identity) -> Watch:
+        assert self.output is not None
+        key = identity.label.lower()
+        if key not in self.watches:
+            self.watches[key] = Watch(
+                identity.uri, identity.service, self.settings.poll_seconds, self.output
+            )
+        return self.watches[key]
+
+    def _inbox(self, identity: Identity) -> Answer:
         """The inbox as the service answers it, or an error carrying its refusal.
 
-        Without a token — or with a revoked one — the service refuses, and that
-        refusal is what the client gets, as it was sent, rather than a subscription
-        that never hears anything.
+        With a revoked token the service refuses, and that refusal is what the
+        client gets, as it was sent, rather than a subscription that never hears
+        anything.
         """
         try:
-            answer = self.service.request("GET", INBOX_PATH)
+            answer = identity.service.request("GET", INBOX_PATH)
         except Unreachable as failed:
             raise ProtocolError(
-                INTERNAL_ERROR, f"Could not reach the service at {self.service.address}: {failed}"
+                INTERNAL_ERROR, f"Could not reach the service at {identity.address}: {failed}"
             ) from None
         if answer.status != 200:
             raise ProtocolError(INTERNAL_ERROR, refusal_text(answer), _refusal_data(answer))
         return answer
 
     def resources_read(self, params: dict[str, Any], era: str) -> dict[str, Any]:
-        self._known(params, era)
-        answer = self._inbox()
+        identity = self._owner(params, era)
+        answer = self._inbox(identity)
         try:
             text = json.dumps(json.loads(answer.data.decode("utf-8")), ensure_ascii=False, indent=2)
         except (UnicodeDecodeError, json.JSONDecodeError):
             text = answer.data.decode("utf-8", errors="replace")
-        return {"contents": [{"uri": INBOX_URI, "mimeType": "application/json", "text": text}]}
+        return {"contents": [{"uri": identity.uri, "mimeType": "application/json", "text": text}]}
 
     def subscribe(self, params: dict[str, Any], era: str) -> dict[str, Any]:
-        assert self.watch is not None
-        self._known(params, era)
-        self._inbox()
-        self.watch.subscribe_legacy()
+        identity = self._owner(params, era)
+        self._inbox(identity)
+        self._watch(identity).subscribe_legacy()
         return {}
 
     def unsubscribe(self, params: dict[str, Any], era: str) -> dict[str, Any]:
-        assert self.watch is not None
-        self._known(params, era)
-        self.watch.unsubscribe_legacy()
+        self._watch(self._owner(params, era)).unsubscribe_legacy()
         return {}
 
     def listen(self, identifier: Any, params: dict[str, Any]) -> None:
         """Open a stream: acknowledge what is honoured, then answer only when it ends."""
-        assert self.watch is not None and self.output is not None
+        assert self.output is not None
         wanted = params.get("notifications") or {}
         uris = wanted.get("resourceSubscriptions") if isinstance(wanted, dict) else None
-        honoured: dict[str, Any] = {}
-        if isinstance(uris, list) and INBOX_URI in uris:
-            self._inbox()
-            honoured["resourceSubscriptions"] = [INBOX_URI]
-        if honoured:
-            self.watch.open_stream(identifier)
+        honoured: list[Identity] = []
+        for uri in uris if isinstance(uris, list) else []:
+            found = INBOX_URI_PATTERN.fullmatch(str(uri))
+            identity = self.find(found["label"]) if found else None
+            if identity is not None and identity not in honoured:
+                self._inbox(identity)
+                honoured.append(identity)
+        for identity in honoured:
+            self._watch(identity).open_stream(identifier)
         self.listening.append(identifier)
+        agreed = {"resourceSubscriptions": [i.uri for i in honoured]} if honoured else {}
         self.output.send(
             {
                 "jsonrpc": "2.0",
                 "method": "notifications/subscriptions/acknowledged",
-                "params": {"_meta": {META_SUBSCRIPTION: identifier}, "notifications": honoured},
+                "params": {"_meta": {META_SUBSCRIPTION: identifier}, "notifications": agreed},
             }
         )
 
@@ -1095,53 +1665,68 @@ def _error(identifier: Any, code: int, message: str, data: Any = None) -> dict[s
 # ------------------------------------------------------------------ start
 
 
-def start(
-    environment: dict[str, str] | os._Environ[str],
-) -> tuple[Settings, Service, list[Operation]]:
+def start(environment: dict[str, str] | os._Environ[str]) -> Server:
     """Everything that has to hold before the first message is read."""
     settings = Settings.from_environment(environment)
-    if settings.token:
-        _SECRET.append(settings.token)
-    service = Service(settings.address, settings.token)
+    for entry in settings.entries:
+        _SECRET.append(entry.token)
+    first = settings.bare_address or settings.entries[0].address
     try:
-        document = service.description()
+        document = Service(first, None).description()
     except Unreachable as failed:
         raise StartRefused(
-            f"could not read the interface description at {settings.address}/openapi.json: "
-            f"{failed}. The tools are made from it, so without it there are none. Check "
-            f"{ADDRESS_VARIABLE}: it is the base address of the participant surface.",
+            f"could not read the interface description at {first}/openapi.json: {failed}. "
+            "The tools are made from it, so without it there are none. The address has to be "
+            "the base address of the participant surface.",
             1,
         ) from None
     try:
         tools = operations_of(document)
+        identity_inputs(tools)
+        if not any(tool.method == "GET" and tool.path == INBOX_PATH for tool in tools):
+            raise StartRefused(
+                f"{first} describes no GET {INBOX_PATH}, so it is not the participant surface "
+                "of simple-a2a. The address has to name that surface.",
+                1,
+            )
+        server = Server(settings, tools, first)
     except DescriptionError as failed:
         raise StartRefused(f"the interface description cannot be mapped: {failed}", 1) from None
-    if not any(tool.method == "GET" and tool.path == INBOX_PATH for tool in tools):
-        raise StartRefused(
-            f"{settings.address} describes no GET {INBOX_PATH}, so it is not the participant "
-            f"surface of simple-a2a. {ADDRESS_VARIABLE} has to name that surface.",
-            1,
-        )
-    return settings, service, tools
+    for entry in settings.entries:
+        problem = server.different(entry.address)
+        if problem:
+            raise StartRefused(f"identity {entry.label}: {problem}", 1)
+        identity = Identity(entry.label, entry.address, entry.token)
+        # Asked once, for display; a refused token is reported, not fatal: the
+        # service will say the same to every call, in its own words.
+        answer = server.lookup(identity)
+        if answer is not None and answer.status != 200:
+            log(f"identity {entry.label}: {refusal_text(answer)}")
+        server.add(identity)
+    return server
 
 
 def main(arguments: list[str] | None = None) -> int:
     given = sys.argv[1:] if arguments is None else arguments
     if given:
         log(
-            "takes no arguments — the address and the token would stand in the process "
-            f"list. Set {ADDRESS_VARIABLE} and {TOKEN_VARIABLE} in the environment instead; "
-            "README.md says how."
+            "takes no arguments — addresses and tokens would stand in the process list. Set "
+            f"{ADDRESS_VARIABLE} and {TOKEN_VARIABLE}, or {IDENTITIES_VARIABLE}, in the "
+            "environment instead; README.md says how."
         )
         return 2
     try:
-        settings, service, tools = start(os.environ)
+        server = start(os.environ)
     except StartRefused as refused:
         log(str(refused))
         return refused.status
-    who = "one identity" if settings.token else "no token yet — only redeeming will work"
-    log(f"{len(tools)} tools for {settings.address}, {who}; waiting on standard input")
-    Server(settings, service, tools).run(sys.stdin.buffer, sys.stdout.buffer)
+    who = (
+        f"identities {server.labels()}"
+        if server.identities
+        else "no identity yet — only redeeming will work"
+    )
+    log(f"{len(server.tools)} tools for {', '.join(server.addresses())}, {who}; waiting")
+    server.run(sys.stdin.buffer, sys.stdout.buffer)
     return 0
 
 

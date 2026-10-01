@@ -79,8 +79,12 @@ def test_the_instructions_name_the_limit_of_notifications() -> None:
     assert "does not wake a sleeping one" in readme.replace("\n", " ")
 
 
-def test_the_instructions_name_both_variables_and_one_identity_per_instance() -> None:
-    readme = (MCP / "README.md").read_text(encoding="utf-8")
+def test_the_instructions_name_the_variables_and_the_rule_for_identities() -> None:
+    readme = " ".join((MCP / "README.md").read_text(encoding="utf-8").split())
 
-    assert "A2A_MCP_ADDRESS" in readme and "A2A_MCP_TOKEN" in readme
-    assert "One instance per identity" in readme
+    for variable in ("A2A_MCP_IDENTITIES", "A2A_MCP_ADDRESS", "A2A_MCP_TOKEN", "A2A_MCP_LABEL"):
+        assert variable in readme, variable
+    assert "With more than one identity, every call has to say which one acts" in readme
+    assert "There is no default" in readme
+    assert "lives only in that process" in readme and "writes no token to disk" in readme
+    assert "simple-a2a://<label>/inbox" in readme
