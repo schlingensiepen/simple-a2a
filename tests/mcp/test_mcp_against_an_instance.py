@@ -989,6 +989,68 @@ def test_held_to_discover_the_handshake_does_not_exist(instance: Instance, progr
     assert "protocol discover" in stderr
 
 
+def test_each_handshake_names_its_client_and_generation_on_standard_error(
+    instance: Instance, programs: Any
+) -> None:
+    anna = programs(instance.anna)
+    anna.initialize()
+    anna.call("inbox")
+    _, stderr = anna.close()
+
+    lines = [line for line in stderr.splitlines() if "opened with initialize" in line]
+    assert lines == [
+        (
+            'simple-a2a-mcp: client "the-cross-test" "1" opened with initialize (handshake '
+            "generation): asked for 2025-11-25, agreed 2025-11-25"
+        )
+    ]
+    assert instance.anna not in stderr
+
+
+def test_a_stateless_client_is_named_once_however_often_it_asks(
+    instance: Instance, programs: Any
+) -> None:
+    anna = programs(instance.anna)
+    other = {**META, "io.modelcontextprotocol/clientInfo": {"name": "another", "version": "2"}}
+    anonymous = {key: value for key, value in META.items() if not key.endswith("clientInfo")}
+
+    anna.ask("server/discover", {"_meta": META})
+    anna.ask("tools/list", {"_meta": META})
+    anna.ask("resources/list", {"_meta": META})
+    anna.ask("tools/list", {"_meta": other})
+    anna.ask("tools/list", {"_meta": anonymous})
+    anna.ask("server/discover", {"_meta": anonymous})
+    _, stderr = anna.close()
+
+    lines = [line for line in stderr.splitlines() if "per request" in line]
+    said = f"speaks {MODERN} per request (server/discover generation), first heard with"
+    assert lines == [
+        f'simple-a2a-mcp: client "the-cross-test" "1" {said} server/discover',
+        f'simple-a2a-mcp: client "another" "2" {said} tools/list',
+        f"simple-a2a-mcp: a client that gave no name {said} tools/list",
+    ]
+
+
+def test_what_a_client_calls_itself_is_written_tamed(instance: Instance, programs: Any) -> None:
+    """One line, printable, short: a client name cannot forge or flood the log."""
+    anna = programs(instance.anna)
+    anna.ask(
+        "initialize",
+        {
+            "protocolVersion": "1999\nsimple-a2a-mcp: forged",
+            "capabilities": {},
+            "clientInfo": {"name": "evil\nsimple-a2a-mcp: forged\x1b[2J" + "x" * 500, "version": 7},
+        },
+    )
+    _, stderr = anna.close()
+
+    line = next(line for line in stderr.splitlines() if "opened with initialize" in line)
+    assert "forged" not in stderr.replace(line, "")
+    assert "\x1b" not in stderr
+    assert "x" * 65 not in line
+    assert "agreed 2025-11-25" in line
+
+
 @pytest.mark.parametrize(
     "arguments",
     [

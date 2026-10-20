@@ -114,6 +114,7 @@ META_VERSION = "io.modelcontextprotocol/protocolVersion"
 META_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
 META_SERVER = "io.modelcontextprotocol/serverInfo"
 META_SUBSCRIPTION = "io.modelcontextprotocol/subscriptionId"
+META_CLIENT = "io.modelcontextprotocol/clientInfo"
 
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -182,6 +183,30 @@ def log(message: str) -> None:
     """One line for a human, on standard error — standard output is the protocol's."""
     sys.stderr.write(f"{NAME}: {message}\n")
     sys.stderr.flush()
+
+
+#: How much of a string a client chose is written to standard error.
+CLIENT_TEXT_LIMIT = 64
+
+
+def _client_text(value: Any) -> str | None:
+    """A string a client chose, fit for one log line: printable, short, or None."""
+    if not isinstance(value, str):
+        return None
+    printable = "".join(character for character in value if character.isprintable())
+    if len(printable) > CLIENT_TEXT_LIMIT:
+        printable = printable[:CLIENT_TEXT_LIMIT] + "…"
+    return printable or None
+
+
+def client_named(info: Any) -> str:
+    """The client as it introduced itself, for a log line — never more than it said."""
+    if not isinstance(info, dict):
+        return "a client that gave no name"
+    name = _client_text(info.get("name"))
+    version = _client_text(info.get("version"))
+    said = f"client {json.dumps(name, ensure_ascii=False)}" if name else "an unnamed client"
+    return f"{said} {json.dumps(version, ensure_ascii=False)}" if version else said
 
 
 # ------------------------------------------------------------------ settings
@@ -1364,6 +1389,8 @@ class Server:
         self.stale: set[str] = set()
         self.identities: list[Identity] = []
         self.negotiated: str | None = None
+        #: The clients of the stateless revision already named on standard error.
+        self.clients_seen: set[str] = set()
         self.output: Output | None = None
         self.watches: dict[str, Watch] = {}
         #: Open `subscriptions/listen` requests, answered only when they end, and those
@@ -1613,6 +1640,8 @@ class Server:
         if method == "initialize":
             return self.initialize(params)
         era = self.era_of(method, params)
+        if era == "modern":
+            self.heard_from(method, params)
         # A request after the handshake, or one of the stateless revision, means the
         # client is listening: from now on new mail may be announced. A ping before
         # the handshake does not count.
@@ -1639,6 +1668,22 @@ class Server:
         if result is None:
             return None
         return self.finished(result, method, era)
+
+    def heard_from(self, method: str, params: dict[str, Any]) -> None:
+        """Name a client of the stateless revision once, on its first request.
+
+        There is no connection to open, so the first request stands in for it —
+        `server/discover`, when the client asks it, as it ought to.
+        """
+        meta = params["_meta"]
+        who = client_named(meta.get(META_CLIENT))
+        if who in self.clients_seen:
+            return
+        self.clients_seen.add(who)
+        log(
+            f"{who} speaks {meta[META_VERSION]} per request (server/discover generation), "
+            f"first heard with {_client_text(method)}"
+        )
 
     def finished(self, result: dict[str, Any], method: str, era: str) -> dict[str, Any]:
         """A result, with what the stateless revision adds to every one."""
@@ -1771,6 +1816,11 @@ class Server:
     def initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         requested = params.get("protocolVersion")
         self.negotiated = requested if requested in LEGACY else LEGACY[0]
+        asked = _client_text(requested)
+        log(
+            f"{client_named(params.get('clientInfo'))} opened with initialize (handshake "
+            f"generation): asked for {asked or 'no protocol version'}, agreed {self.negotiated}"
+        )
         return {
             "protocolVersion": self.negotiated,
             "capabilities": self.capabilities(),

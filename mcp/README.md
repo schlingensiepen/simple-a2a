@@ -138,7 +138,9 @@ claude --dangerously-load-development-channels server:simple-a2a
 The standard notification that an inbox changed stays available in either
 generation: `resources/subscribe` after `initialize`, `subscriptions/listen` in
 revision 2026-07-28. The server names the generation it answers in the line it
-writes to standard error when it starts.
+writes to standard error when it starts, and writes one more line for each client:
+which generation it opened, the protocol version, and the name and version the
+client gave — for a client of revision 2026-07-28 once, not for every request.
 
 ## Adding identities while it runs
 
