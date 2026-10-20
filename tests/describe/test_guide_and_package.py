@@ -187,3 +187,22 @@ def test_no_part_names_another_surface(surface: str) -> None:
     for name, text in texts.items():
         for giveaway in elsewhere:
             assert giveaway not in text, f"{surface}/{name} names {giveaway!r}"
+
+
+def test_the_approval_per_sender_offers_a_blanket_one_and_honours_the_assignment() -> None:
+    """Where the rule stands, the shorter answer stands beside it.
+
+    An agent that ran without anybody to ask waited out its whole run on a question,
+    although its assignment had already answered it.
+    """
+    made = guide_of("messaging")
+    skill = package.skill_half(made, "the participant surface")
+
+    for text in (made.part("receiving"), made.part("guide"), skill):
+        flat = " ".join(text.split())
+        assert "**blanket approval**" in flat
+        assert (
+            "If the assignment you were started with already gives such an approval, it counts"
+            in flat
+        )
+        assert "do not ask again" in flat
