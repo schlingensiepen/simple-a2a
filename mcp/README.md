@@ -207,8 +207,9 @@ is answered meanwhile.
 The service never calls anybody back. This server asks it, for every identity, at
 the interval in `A2A_MCP_POLL_SECONDS`, and finds each message that was not there
 before. What an inbox held when its identity came in — at the start, or when it was
-added — is not news and is not announced. Each new message is told once, in up to
-three ways:
+added — is not news and is not announced; if the service could not be reached at
+that moment, what was sent from then on is news once it can. Each new message is
+told once, in up to three ways:
 
 - **As a channel notification.** The server declares the capability
   `experimental: {"claude/channel": {}}`, in both protocol revisions, and sends

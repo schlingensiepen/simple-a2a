@@ -69,6 +69,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1251,6 +1252,22 @@ def channel_notification(identity: Identity, entry: dict[str, Any]) -> dict[str,
     }
 
 
+#: `datetime.UTC` and a trailing `Z` in `fromisoformat` are Python 3.11; this runs on 3.10.
+UTC = timezone.utc  # noqa: UP017
+
+
+def _sent_at(entry: dict[str, Any]) -> datetime | None:
+    """When an inbox entry was sent, as the service says it, or None if it says nothing."""
+    value = entry.get("sent_at")
+    if not isinstance(value, str):
+        return None
+    try:
+        when = datetime.fromisoformat(value.replace("Z", "+00:00"))  # noqa: FURB162
+    except ValueError:
+        return None
+    return when if when.tzinfo is not None else when.replace(tzinfo=UTC)
+
+
 class Lookout:
     """Asking the service about one identity's inbox for as long as the identity is here.
 
@@ -1264,6 +1281,12 @@ class Lookout:
 
     Nothing is announced before the client has introduced itself; a message that
     arrives meanwhile is found by the first look after that.
+
+    If the first look fails, the inbox as it was when the identity came in is
+    unknown, and the first look that works sees it together with whatever arrived
+    since. Then the time the identity came in decides: what was sent from that
+    moment on is news. It is this machine's clock against the service's, so a
+    message sent within their difference of that moment may go either way.
     """
 
     def __init__(
@@ -1286,6 +1309,10 @@ class Lookout:
         self.stopped = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        #: When the identity came in, to the millisecond the service writes.
+        now = datetime.now(UTC)
+        self._since = now.replace(microsecond=now.microsecond // 1000 * 1000)
+        self._first = True
         self._look()
 
     def start(self) -> None:
@@ -1332,6 +1359,7 @@ class Lookout:
         """
         found: list[dict[str, Any]] = []
         offset = 0
+        first, self._first = self._first, False
         while True:
             page = self._page(offset)
             if page is None:
@@ -1343,9 +1371,13 @@ class Lookout:
                 break
             offset += LOOK_WINDOW
         if self._known is None:
-            # The first look that worked is what was there before: nothing to announce.
-            self._known = {str(entry.get("message_id")) for entry in found}
-            return
+            # The first look that worked is what was there before: nothing to announce —
+            # unless an earlier one failed, and what came since is in it too.
+            self._known = {
+                str(entry.get("message_id"))
+                for entry in found
+                if first or (sent := _sent_at(entry)) is None or sent < self._since
+            }
         new = [entry for entry in found if str(entry.get("message_id")) not in self._known]
         if not new:
             return
