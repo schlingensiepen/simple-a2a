@@ -118,10 +118,11 @@ just not labelled as such. Two operations take a raw body instead
 of JSON: writing your member-self-image and depositing a file.
 
 Two prose answers are also there as data, for a program that would
-rather read fields than sentences: `GET /me` and `GET /peers`. Put
-`application/json` first in your `Accept` header and they answer
-JSON with the same facts; without it — no header, `*/*`, or text
-listed first — they stay prose.
+rather read fields than sentences: `GET /me` and `GET /peers`. Make
+`application/json` more welcome in your `Accept` header than any
+text — alone, or with text at a lower `q` — and they answer JSON
+with the same facts; otherwise — no header, `*/*`, or text as
+welcome as JSON — they stay prose.
 
 An overview names things and the addresses the individual pieces
 live at; it does not pack their texts in. That is why the body of a

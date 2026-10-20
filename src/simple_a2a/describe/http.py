@@ -98,44 +98,69 @@ def guard(operation_id: str) -> Iterator[None]:
 
 def prose(text: str, request: Request) -> Response:
     """Answer with prose, labelled the way the caller asked for it."""
-    wants_markdown = "text/markdown" in (request.headers.get("accept") or "")
+    ranges = accepted(request.headers.get("accept"))
+    wants_markdown = any(media == "text/markdown" and q > 0 for media, q in ranges)
     return PlainTextResponse(text, media_type=MARKDOWN if wants_markdown else PLAIN)
+
+
+def accepted(header: str | None) -> list[tuple[str, float]]:
+    """The media ranges of an Accept header, lower case, each with its quality.
+
+    Parameters other than the quality are dropped, and so is anything after it; a
+    quality that is not a number counts as zero rather than as a wish.
+    """
+    ranges: list[tuple[str, float]] = []
+    for part in (header or "").split(","):
+        media, *parameters = (piece.strip() for piece in part.split(";"))
+        if media.count("/") != 1:
+            continue
+        quality = 1.0
+        for parameter in parameters:
+            name, _, value = parameter.partition("=")
+            if name.strip().lower() == "q":
+                try:
+                    quality = min(max(float(value), 0.0), 1.0)
+                except ValueError:
+                    quality = 0.0
+                break
+        ranges.append((media.lower(), quality))
+    return ranges
+
+
+def quality(ranges: list[tuple[str, float]], media: str) -> float:
+    """How welcome `media` is: the quality of the most specific range that matches it.
+
+    `type/subtype` before `type/*` before `*/*`; no range that matches is zero.
+    """
+    kind = media.split("/")[0]
+    for candidate in (media, f"{kind}/*", "*/*"):
+        found = [q for name, q in ranges if name == candidate]
+        if found:
+            return max(found)
+    return 0.0
+
+
+#: The prose an address with both offers, as its description names it.
+PROSE_MEDIA = ("text/plain", "text/markdown")
 
 
 def wants_data(request: Request) -> bool:
     """Whether the caller prefers JSON to prose, by its Accept header.
 
-    Only where an address offers both — the prose stays the answer for anybody who
-    does not ask: a missing header, `*/*`, or text listed first. Preference is the
-    quality value, then the order in the header, which is how most callers express
-    it without writing a quality at all.
+    Only where an address offers both — and every such address asks here. JSON is
+    the answer only when it is more welcome than either kind of prose: each is
+    weighed by the most specific range that names it, so `application/*` asks for
+    data, and `*/*;q=1` outweighs `application/json;q=0.5`. A tie keeps the prose,
+    so does a missing header or `*/*`: prose is what anybody gets who does not ask.
     """
-    best: tuple[float, int, bool] | None = None
-    for position, part in enumerate((request.headers.get("accept") or "").split(",")):
-        media, *parameters = (piece.strip() for piece in part.split(";"))
-        media = media.lower()
-        if media not in ("application/json", "text/markdown", "text/plain", "text/*"):
-            continue
-        quality = 1.0
-        for parameter in parameters:
-            if parameter.startswith("q="):
-                try:
-                    quality = float(parameter[2:])
-                except ValueError:
-                    quality = 0.0
-        if quality <= 0:
-            continue
-        candidate = (-quality, position, media == "application/json")
-        if best is None or candidate[:2] < best[:2]:
-            best = candidate
-    return bool(best and best[2])
+    ranges = accepted(request.headers.get("accept"))
+    data = quality(ranges, "application/json")
+    text = max(quality(ranges, media) for media in PROSE_MEDIA)
+    return data > text
 
 
 #: The two kinds of answer an address with both offers, for its description.
-PROSE_OR_DATA = {
-    "text/plain": {"schema": {"type": "string"}},
-    "text/markdown": {"schema": {"type": "string"}},
-}
+PROSE_OR_DATA = {media: {"schema": {"type": "string"}} for media in PROSE_MEDIA}
 
 
 def identifier_of(route: APIRoute) -> str:

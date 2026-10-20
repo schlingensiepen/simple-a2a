@@ -159,8 +159,8 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         responses={
             200: {
                 "description": "Prose naming each team with its size and the address of its "
-                "traffic — or, if you ask for application/json first, the same window as "
-                "`entries`.",
+                "traffic — or, if you prefer application/json to text, the same window "
+                "as `entries`.",
                 "model": models.Teams,
                 "content": http.PROSE_OR_DATA,
             }
@@ -235,8 +235,8 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         responses={
             200: {
                 "description": "Prose naming each member with their marks and the addresses "
-                "of their texts — or, if you ask for application/json first, the same window "
-                "as `entries`, the marks as fields.",
+                "of their texts — or, if you prefer application/json to text, the same "
+                "window as `entries`, the marks as fields.",
                 "model": models.Members,
                 "content": http.PROSE_OR_DATA,
             }

@@ -171,8 +171,8 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         response_class=Response,
         responses={
             200: {
-                "description": "Prose that branches to your texts — or, if you ask for "
-                "application/json first, your kind, name, team and right as data.",
+                "description": "Prose that branches to your texts — or, if you prefer "
+                "application/json to text, your kind, name, team and right as data.",
                 "model": models.Me,
                 "content": http.PROSE_OR_DATA,
             }
@@ -276,8 +276,8 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         responses={
             200: {
                 "description": "Prose naming each member with their marks and the addresses "
-                "of their texts — or, if you ask for application/json first, the same window "
-                "as `entries`.",
+                "of their texts — or, if you prefer application/json to text, the same "
+                "window as `entries`.",
                 "model": models.Peers,
                 "content": http.PROSE_OR_DATA,
             }

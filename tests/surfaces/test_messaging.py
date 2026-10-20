@@ -721,7 +721,7 @@ def test_me_answers_as_data_when_asked_and_as_prose_otherwise(
     """The same facts, for a peer and for a central service; prose stays the default.
 
     A program keeping several identities apart needs them as fields. Everybody who
-    does not ask — no Accept, `*/*`, text first — gets exactly what they got before.
+    does not ask — no Accept, `*/*`, text as welcome — gets exactly what they got before.
     """
     a_team(admin)
     anna = joined(admin, participants, "Anna")
@@ -753,9 +753,16 @@ def test_me_answers_as_data_when_asked_and_as_prose_otherwise(
     assert as_service.json() == {"kind": "service", "name": "weather"}
     assert prose.headers["content-type"].startswith("text/plain")
     assert prose.text.startswith("# You are Anna, in kitchen")
-    for accept in ("*/*", "text/markdown, application/json", "application/json;q=0.5, text/plain"):
+    for accept in (
+        "*/*",
+        "text/markdown, application/json",
+        "application/json;q=0.5, text/plain",
+        "application/json;q=0.5, */*;q=1",
+    ):
         assert not me(anna, accept).headers["content-type"].startswith("application/json"), accept
     assert me(anna, "text/plain;q=0.5, application/json").json()["name"] == "Anna"
+    assert me(anna, "application/*").json()["name"] == "Anna"
+    assert me(anna, "application/*;q=1, text/plain;q=0.5").json()["name"] == "Anna"
 
 
 def test_the_description_of_me_offers_both_answers(participants: TestClient) -> None:

@@ -105,10 +105,11 @@ derived from the extension of the name in the address you used.
 
 Two prose answers are also there as data, for a program that would
 rather read fields than sentences: `GET /teams` and
-`GET /teams/{team}/peers`. Put `application/json` first in your
-`Accept` header and they answer JSON with the same facts — the realm
-master right and a revoked token as fields rather than marks; without
-it — no header, `*/*`, or text listed first — they stay prose.
+`GET /teams/{team}/peers`. Make `application/json` more welcome in
+your `Accept` header than any text — alone, or with text at a lower
+`q` — and they answer JSON with the same facts — the realm master
+right and a revoked token as fields rather than marks; otherwise —
+no header, `*/*`, or text as welcome as JSON — they stay prose.
 
 An overview names things and the addresses the individual pieces live
 at; it does not pack their texts in. That is why the body of a
