@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Path, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from simple_a2a.core import tokens
 from simple_a2a.describe import directories, http
@@ -152,8 +153,18 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
 
     @app.get(
         "/teams",
-        summary="The teams of this installation. The one operation no participant has.",
+        summary="The teams of this installation. The one operation no participant has. Prose "
+        "by default; with `Accept: application/json`, the same list as data.",
         response_class=Response,
+        responses={
+            200: {
+                "description": "Prose naming each team with its size and the address of its "
+                "traffic — or, if you ask for application/json first, the same window as "
+                "`entries`.",
+                "model": models.Teams,
+                "content": http.PROSE_OR_DATA,
+            }
+        },
     )
     async def teams(
         request: Request,
@@ -164,6 +175,16 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         with guard("GET /teams"):
             window = access.Window.of(offset, limit)
             everything = access.teams(context, caller.realm_id, access.Window.of(0, 100))
+            if http.wants_data(request):
+                return JSONResponse(
+                    {
+                        "entries": [
+                            {"team_name": entry["team_name"], "member_count": entry["member_count"]}
+                            for entry in window.over(everything)
+                        ]
+                    },
+                    media_type=http.JSON,
+                )
             return http.prose(
                 prose.teams(
                     entries=window.over(everything),
@@ -208,8 +229,18 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
 
     @app.get(
         "/teams/{team}/peers",
-        summary="Who is in a team, with the marks for the right and for a revoked token.",
+        summary="Who is in a team, with the marks for the right and for a revoked token. Prose "
+        "by default; with `Accept: application/json`, the same list as data.",
         response_class=Response,
+        responses={
+            200: {
+                "description": "Prose naming each member with their marks and the addresses "
+                "of their texts — or, if you ask for application/json first, the same window "
+                "as `entries`, the marks as fields.",
+                "model": models.Members,
+                "content": http.PROSE_OR_DATA,
+            }
+        },
     )
     async def peers(
         team: TeamName,
@@ -222,6 +253,11 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
             team_id = team_of(caller, team)
             window = access.Window.of(offset, limit)
             everybody = access.members(context, caller.realm_id, team_id, access.Window.of(0, 100))
+            if http.wants_data(request):
+                return JSONResponse(
+                    {"entries": [_member(entry) for entry in window.over(everybody)]},
+                    media_type=http.JSON,
+                )
             prefix = f"/teams/{_quote(team)}/peers"
             return http.prose(
                 directories.peers(
@@ -458,6 +494,16 @@ def _quote(name: str) -> str:
     from urllib.parse import quote
 
     return quote(name, safe="")
+
+
+def _member(entry: dict[str, object]) -> dict[str, object]:
+    """One member as data, named as the traffic names a participant."""
+    return {
+        "kind": "peer",
+        "name": entry["member_name"],
+        "is_realm_master": entry["is_realm_master"],
+        "token_revoked": entry["token_revoked"],
+    }
 
 
 def _peer(context: Context, caller: Observer, team_id: str, name: str):

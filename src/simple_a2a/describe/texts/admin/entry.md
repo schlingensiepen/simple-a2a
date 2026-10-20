@@ -31,6 +31,13 @@ is worthless, and a token presented at the wrong address is given
 away to strangers — nothing here will tell you that it happened,
 because no answer names a host.
 
+## Prose and data
+
+This page and the guide are prose. Every operation here answers
+with data, JSON, and no address on this surface offers both: there
+is no `Accept: application/json` to send for it. The two setup notes
+come back as the raw text that was written.
+
 ## The guide
 
 The guide is one document spread over several addresses. Each part

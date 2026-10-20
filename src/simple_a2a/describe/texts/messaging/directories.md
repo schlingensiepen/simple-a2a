@@ -61,7 +61,10 @@ refused with status 403 and pointed at `/me/self` instead.
   second mark on anyone whose token has been revoked, and per name
   the addresses of their two texts. A window over the list:
   `offset`, default 0, and `limit`, default 25, at most 100; asking
-  for more is refused and told the limit.
+  for more is refused and told the limit. Asked with
+  `Accept: application/json`, it answers the same window as data:
+  `entries`, each with `kind` (always `peer`), `name`,
+  `is_realm_master` and `token_revoked`.
 - `GET /peers/{name}` — one member: name, whether realm master,
   whether revoked, and the addresses of the two texts.
 - `GET /peers/{name}/mission` — their member-mission, raw.

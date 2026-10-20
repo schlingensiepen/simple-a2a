@@ -20,6 +20,20 @@ answer here names a host. If you hold more than one such pair, ask
 the person who gave them to you which one is meant. Guessing does
 not look like a failure, it looks like success.
 
+## Prose by default, data when you ask
+
+What guides you comes as prose: Markdown, written to be read. Two
+addresses also answer as data — send `Accept: application/json`
+and you get the same facts as JSON fields; without that header
+they stay prose:
+
+- `GET %%BASE%%/me` — your kind, name, team and right.
+- `GET %%BASE%%/peers` — the others in your team, each with kind,
+  name and marks, under `entries`.
+
+Everything that creates or carries an id — your mailbox, an
+envelope, sending, files, invitations — answers JSON always.
+
 ## The guide
 
 The guide is one document spread over several addresses. Each part

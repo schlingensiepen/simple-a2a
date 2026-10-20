@@ -270,8 +270,18 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
 
     @app.get(
         "/peers",
-        summary="Who else is in your team. These are the names you can address.",
+        summary="Who else is in your team. These are the names you can address. Prose by "
+        "default; with `Accept: application/json`, the same list as data.",
         response_class=Response,
+        responses={
+            200: {
+                "description": "Prose naming each member with their marks and the addresses "
+                "of their texts — or, if you ask for application/json first, the same window "
+                "as `entries`.",
+                "model": models.Peers,
+                "content": http.PROSE_OR_DATA,
+            }
+        },
     )
     async def peers(
         request: Request,
@@ -285,6 +295,21 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
                 context, caller.realm_id, caller.team_id, access.Window.of(0, 100)
             )
             shown = [entry for entry in everyone if entry["member_name"] != caller.name]
+            if http.wants_data(request):
+                return JSONResponse(
+                    {
+                        "entries": [
+                            {
+                                "kind": "peer",
+                                "name": entry["member_name"],
+                                "is_realm_master": entry["is_realm_master"],
+                                "token_revoked": entry["token_revoked"],
+                            }
+                            for entry in window.over(shown)
+                        ]
+                    },
+                    media_type=http.JSON,
+                )
             return http.prose(
                 prose.peers(
                     entries=window.over(shown),

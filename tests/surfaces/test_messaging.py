@@ -766,3 +766,86 @@ def test_the_description_of_me_offers_both_answers(participants: TestClient) -> 
     assert {"text/plain", "text/markdown", "application/json"} <= set(offered)
     assert offered["application/json"]["schema"]["$ref"].endswith("/Me")
     assert gate.check_description(document, gate.Rules(surface="messaging"))
+
+
+# ------------------------------------------------------------- your team, as data
+
+
+def test_peers_answers_as_data_when_asked_and_as_prose_otherwise(
+    admin: TestClient, participants: TestClient
+) -> None:
+    """The same list for a program, with kind, name and the marks the prose shows.
+
+    A program that read the prose as JSON lost a session over it; one that fished the
+    names out with a pattern was one rewording away from the same. A central service
+    has no team, and is refused the same way in both forms.
+    """
+    a_team(admin)
+    anna = joined(admin, participants, "Anna")
+    joined(admin, participants, "Berta")
+    voucher = participants.post(
+        "/invitations/peer",
+        json={"member_name": "Clara", "member_mission": "m", "display_name": "for Clara"},
+        headers=bearer(anna),
+    ).json()["invitation"]
+    participants.post("/invitations/redeem", json={"invitation": voucher})
+    admin.delete("/realms/household/teams/kitchen/members/Clara/token")
+    weather = participants.post(
+        "/invitations/redeem",
+        json={
+            "invitation": participants.post(
+                "/invitations/service",
+                json={"service_name": "weather", "display_name": "for weather"},
+                headers=bearer(anna),
+            ).json()["invitation"],
+            "member_self_image": "I answer about weather.",
+        },
+    ).json()["token"]
+
+    def peers(token: str, accept: str | None, query: str = "") -> object:
+        headers = bearer(token) | ({"Accept": accept} if accept else {})
+        return participants.get(f"/peers{query}", headers=headers)
+
+    data = peers(anna, "application/json")
+    prose = peers(anna, None)
+
+    assert data.headers["content-type"].startswith("application/json")
+    assert data.json() == {
+        "entries": [
+            {"kind": "peer", "name": "Berta", "is_realm_master": True, "token_revoked": False},
+            {"kind": "peer", "name": "Clara", "is_realm_master": False, "token_revoked": True},
+        ]
+    }
+    assert prose.headers["content-type"].startswith("text/plain")
+    assert "**Clara** (token revoked)" in prose.text
+    assert peers(anna, "application/json", "?offset=1&limit=1").json()["entries"] == [
+        data.json()["entries"][1]
+    ]
+    for accept in ("*/*", "text/markdown, application/json"):
+        assert not peers(anna, accept).headers["content-type"].startswith("application/json")
+    for accept in ("application/json", None):
+        refused = peers(weather, accept)
+        assert refused.status_code == 403, accept
+        assert refused.json()["type"] == "wrong-token", accept
+
+
+def test_the_description_of_peers_offers_both_answers(participants: TestClient) -> None:
+    document = participants.get("/openapi.json").json()
+
+    offered = document["paths"]["/peers"]["get"]["responses"]["200"]["content"]
+
+    assert {"text/plain", "text/markdown", "application/json"} <= set(offered)
+    assert offered["application/json"]["schema"]["$ref"].endswith("/Peers")
+    assert gate.check_description(document, gate.Rules(surface="messaging"))
+
+
+def test_the_entry_and_the_guide_say_where_data_can_be_asked_for(
+    participants: TestClient,
+) -> None:
+    entry = participants.get("/").text
+    concepts = participants.get("/guide/concepts").text
+
+    assert "Accept: application/json" in entry
+    for address in ("/me", "/peers"):
+        assert f"{address}` —" in entry, address
+    assert "`entries`" in concepts

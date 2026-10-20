@@ -481,3 +481,11 @@ def test_the_secret_is_never_in_an_answer(admin: TestClient) -> None:
     founded(admin)
     for address in ("/", "/guide", "/openapi.json", "/realms", "/realms/household/teams"):
         assert ADMIN_SECRET not in admin.get(address).text, address
+
+
+def test_the_entry_says_that_nothing_here_is_negotiated(no_token: TestClient) -> None:
+    """Every surface names its rule; here the rule is that there is nothing to ask for."""
+    entry = no_token.get("/").text
+
+    assert "## Prose and data" in entry
+    assert "Accept: application/json" in entry

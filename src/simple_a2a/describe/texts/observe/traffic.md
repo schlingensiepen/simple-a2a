@@ -20,6 +20,8 @@ contain spaces.
 - `GET /teams` — the names of the teams of your realm,
   alphabetically, with the address of each. This is the call nobody
   inside a team may have, and it is what this surface exists for.
+  Asked with `Accept: application/json`, it answers the same window
+  as data: `entries`, each with `team_name` and `member_count`.
 - `GET /teams/{team}` — one team: its name, how many members it has,
   and the addresses of its purpose and its members.
 - `GET /teams/{team}/purpose` — the purpose of the team, raw, as
@@ -30,7 +32,10 @@ contain spaces.
 - `GET /teams/{team}/peers` — the names of the members,
   alphabetically, a mark on whoever carries the realm master right
   and a second mark on anyone whose token has been revoked, and per
-  name the addresses of their two texts.
+  name the addresses of their two texts. Asked with
+  `Accept: application/json`, it answers the same window as data:
+  `entries`, each with `kind` (always `peer`), `name`,
+  `is_realm_master` and `token_revoked`.
 - `GET /teams/{team}/peers/{name}` — one member: name, whether realm
   master, whether revoked, and the addresses of the two texts.
 - `GET /teams/{team}/peers/{name}/mission` — their member-mission,

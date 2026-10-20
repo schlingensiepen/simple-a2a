@@ -19,6 +19,21 @@ will tell you that it happened, because no answer names a host. If
 you hold more than one such pair, ask which one is meant rather than
 guessing.
 
+## Prose by default, data when you ask
+
+What guides you comes as prose: Markdown, written to be read. Two
+addresses also answer as data — send `Accept: application/json` and
+you get the same facts as JSON fields; without that header they stay
+prose:
+
+- `GET %%BASE%%/teams` — the teams of the realm, each with its name
+  and size, under `entries`.
+- `GET %%BASE%%/teams/{team}/peers` — the members of one team, each
+  with kind and name, the realm master right and a revoked token as
+  fields, under `entries`.
+
+The traffic and the envelopes carry ids and answer JSON always.
+
 ## The guide
 
 The guide is one document spread over several addresses. Each part

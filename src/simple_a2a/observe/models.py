@@ -130,3 +130,51 @@ class Envelope(BaseModel):
         description="The message this one answers, when it answers one.",
         examples=["the-identifier-is-43-characters-of-base64url"],
     )
+
+
+class TeamEntry(BaseModel):
+    team_name: str = Field(
+        description="The name of the team. Its traffic is at GET /teams/{team}/traffic.",
+        examples=["kitchen"],
+    )
+    member_count: int = Field(
+        description="How many members it has, revoked ones included.", examples=[3]
+    )
+
+
+class Teams(BaseModel):
+    """The teams of the realm as data: the same list the prose of GET /teams is."""
+
+    entries: list[TeamEntry] = Field(
+        description="A window over the teams of your realm, alphabetically. `offset` and "
+        "`limit` move it, as with every listing.",
+        examples=[[{"team_name": "kitchen", "member_count": 3}]],
+    )
+
+
+class MemberEntry(BaseModel):
+    kind: str = Field(
+        description="Always `peer`: a member of the team, as the traffic names them.",
+        examples=["peer"],
+    )
+    name: str = Field(description="The member's name.", examples=["Anna"])
+    is_realm_master: bool = Field(
+        description="Whether their token carries the realm master right.", examples=[True]
+    )
+    token_revoked: bool = Field(
+        description="Whether their token has been revoked. A revoked member stays listed, "
+        "because what they said is still in the traffic.",
+        examples=[False],
+    )
+
+
+class Members(BaseModel):
+    """The members of one team as data: the same list the prose of its peers is."""
+
+    entries: list[MemberEntry] = Field(
+        description="A window over the members of the team, alphabetically. `offset` and "
+        "`limit` move it, as with every listing.",
+        examples=[
+            [{"kind": "peer", "name": "Anna", "is_realm_master": True, "token_revoked": False}]
+        ],
+    )

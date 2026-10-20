@@ -412,3 +412,66 @@ def test_a_wrong_verb_at_a_fixed_address_stays_a_wrong_verb(observation: TestCli
 
     assert answer.status_code == 405
     assert answer.json()["type"] == "wrong-verb"
+
+
+# ------------------------------------------------------------- the lists, as data
+
+
+def test_the_teams_and_their_members_answer_as_data_when_asked(
+    admin: TestClient, participants: TestClient, observation: TestClient
+) -> None:
+    """The marks become fields; the prose stays what everybody else gets."""
+    eye = bearer(watching(admin))
+    admin.post("/realms/household/teams", json={"team_name": "garden", "team_purpose": "x"})
+    member(admin, participants, "Anna")
+    member(admin, participants, "Berta")
+    admin.delete("/realms/household/teams/kitchen/members/Berta/realmmaster")
+    admin.delete("/realms/household/teams/kitchen/members/Berta/token")
+    as_data = eye | {"Accept": "application/json"}
+
+    teams = observation.get("/teams", headers=as_data)
+    members = observation.get("/teams/kitchen/peers", headers=as_data)
+    prose = observation.get("/teams/kitchen/peers", headers=eye)
+
+    assert teams.headers["content-type"].startswith("application/json")
+    assert teams.json() == {
+        "entries": [
+            {"team_name": "garden", "member_count": 0},
+            {"team_name": "kitchen", "member_count": 2},
+        ]
+    }
+    assert observation.get("/teams?limit=1", headers=as_data).json()["entries"] == [
+        {"team_name": "garden", "member_count": 0}
+    ]
+    entries = members.json()["entries"]
+    assert [(e["kind"], e["name"]) for e in entries] == [("peer", "Anna"), ("peer", "Berta")]
+    assert (entries[0]["is_realm_master"], entries[0]["token_revoked"]) == (True, False)
+    assert (entries[1]["is_realm_master"], entries[1]["token_revoked"]) == (False, True)
+    assert prose.headers["content-type"].startswith("text/plain")
+    assert "**Berta** (token revoked)" in prose.text
+    assert observation.get("/teams", headers=eye).text.startswith("# Teams")
+
+
+@pytest.mark.parametrize(
+    ("path", "model"), [("/teams", "Teams"), ("/teams/{team}/peers", "Members")]
+)
+def test_the_description_offers_both_answers(
+    observation: TestClient, path: str, model: str
+) -> None:
+    document = observation.get("/openapi.json").json()
+
+    offered = document["paths"][path]["get"]["responses"]["200"]["content"]
+
+    assert {"text/plain", "text/markdown", "application/json"} <= set(offered)
+    assert offered["application/json"]["schema"]["$ref"].endswith(f"/{model}")
+
+
+def test_the_entry_and_the_guide_say_where_data_can_be_asked_for(
+    observation: TestClient,
+) -> None:
+    entry = observation.get("/").text
+    concepts = observation.get("/guide/concepts").text
+
+    assert "Accept: application/json" in entry
+    assert "/teams` —" in entry and "/teams/{team}/peers` —" in entry
+    assert "`entries`" in concepts

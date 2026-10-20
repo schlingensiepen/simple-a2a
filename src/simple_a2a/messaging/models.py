@@ -420,6 +420,37 @@ class Me(BaseModel):
     )
 
 
+class PeerEntry(BaseModel):
+    """One member of the caller's team, as data — what a line of the prose says."""
+
+    kind: str = Field(
+        description="Always `peer`: everybody listed here is in your team, addressed with "
+        "POST /peers/messages.",
+        examples=["peer"],
+    )
+    name: str = Field(description="Their name, the one to put in `recipients`.", examples=["Berta"])
+    is_realm_master: bool = Field(
+        description="Whether their token carries the realm master right.", examples=[False]
+    )
+    token_revoked: bool = Field(
+        description="Whether their token has been revoked. Sending to them still works; "
+        "nothing will read it.",
+        examples=[False],
+    )
+
+
+class Peers(BaseModel):
+    """The members of the caller's team as data: the same list the prose of GET /peers is."""
+
+    entries: list[PeerEntry] = Field(
+        description="A window over the others in your team, alphabetically, you left out. "
+        "`offset` and `limit` move it, as with every listing.",
+        examples=[
+            [{"kind": "peer", "name": "Berta", "is_realm_master": False, "token_revoked": False}]
+        ],
+    )
+
+
 class FoundTeam(Input):
     team_name: str = Field(
         description="The name of the team to create. Unique across the installation's realm.",

@@ -117,6 +117,12 @@ otherwise `text/plain; charset=utf-8` — the same Markdown text,
 just not labelled as such. Two operations take a raw body instead
 of JSON: writing your member-self-image and depositing a file.
 
+Two prose answers are also there as data, for a program that would
+rather read fields than sentences: `GET /me` and `GET /peers`. Put
+`application/json` first in your `Accept` header and they answer
+JSON with the same facts; without it — no header, `*/*`, or text
+listed first — they stay prose.
+
 An overview names things and the addresses the individual pieces
 live at; it does not pack their texts in. That is why the body of a
 message does not arrive with its envelope, and why you can look at
@@ -132,7 +138,10 @@ Every listing is a window over a list: `offset`, default 0, and
 `limit`, default 25, at most 100. Both are query parameters. Asking
 for more than 100 is refused and you are told the limit — silently
 shortening would make you believe you had reached the end of the
-list.
+list. A listing that answers as data carries the window under one
+key, `entries`, a list of objects: `GET /inbox`, `GET /outbox`, and
+`GET /peers` asked for JSON. A window shorter than `limit` is the
+end of the list.
 
 ## Success and refusal
 
