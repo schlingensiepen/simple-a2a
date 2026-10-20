@@ -32,6 +32,8 @@ def asking(accept: str | None) -> Request:
         "application/json; charset=utf-8; q=0.8, text/plain; q=0.7",
         "*/*;q=0.5, application/*;q=0.6",
         "text/markdown;q=0, text/plain;q=0, application/json;q=0.1",
+        "application/json;q=0.5, text/plain;q=NaN, text/markdown;q=0, */*;q=0.1",
+        "application/json, text/plain;q=inf, */*;q=0",
     ],
 )
 def test_data_when_it_is_more_welcome_than_any_prose(accept: str) -> None:

@@ -17,6 +17,7 @@ the same parameter.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Annotated, Any
@@ -119,9 +120,10 @@ def accepted(header: str | None) -> list[tuple[str, float]]:
             name, _, value = parameter.partition("=")
             if name.strip().lower() == "q":
                 try:
-                    quality = min(max(float(value), 0.0), 1.0)
+                    quality = float(value)
                 except ValueError:
                     quality = 0.0
+                quality = min(max(quality, 0.0), 1.0) if math.isfinite(quality) else 0.0
                 break
         ranges.append((media.lower(), quality))
     return ranges
