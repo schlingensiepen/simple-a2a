@@ -150,7 +150,13 @@ class InvitationOut(BaseModel):
         "into a team, and how they get back into a team where nobody can act any more.",
         examples=["the-voucher-is-43-characters-long-and-random"],
     )
+    member_name: str = Field(
+        description="Who the identity will be once it is redeemed. Here beside the secret, so "
+        "the one answer that shows it also says whom it is for.",
+        examples=["Anna"],
+    )
     team_name: str = Field(description="The team the invitation is for.", examples=["kitchen"])
+    realm_name: str = Field(description="The realm that team is in.", examples=["household"])
 
 
 class InvitationEntry(BaseModel):
@@ -184,14 +190,14 @@ class InvitationEntry(BaseModel):
     )
     issued_by: str | None = Field(
         default=None,
-        description="Who obtained it, when that was a person in a team. Named so you can "
-        "find their invitations after revoking their token: those stay redeemable and have "
-        "to be revoked one by one.",
+        description="Who obtained it, when that was a person in a team; `null` when you did. "
+        "Named so you can find their invitations after revoking their token: those stay "
+        "redeemable and have to be revoked one by one.",
         examples=["Anna"],
     )
     redeemed_at: str | None = Field(
         default=None,
-        description="When it was used up, or absent while it is still good. It is good once.",
+        description="When it was used up, or `null` while it is still good. It is good once.",
         examples=["2026-09-28T09:20:01.004Z"],
     )
     revoked: bool = Field(description="Whether it has been revoked.", examples=[False])
@@ -211,6 +217,7 @@ class InvitationList(BaseModel):
                     "target_name": "Anna",
                     "issued_at": "2026-09-28T09:12:44.081Z",
                     "issued_by_kind": "operator",
+                    "issued_by": None,
                     "redeemed_at": None,
                     "revoked": False,
                 }

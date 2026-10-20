@@ -98,9 +98,11 @@ itself and its members are not here either.
 
 `GET /realms/{realm}/invitations` gives `invitations` with
 `display_name`, the `kind` of the invitation — `member` or `service`
-— `team_name`, `target_name`, `issued_at`, `issued_by_kind`, which
-is `member` or `operator`, `issued_by` where the issuer was a
-member, plus `redeemed_at` and `revoked`. **Never the secret.**
+— `team_name` for an invitation into a team, `target_name`,
+`issued_at`, `issued_by_kind`, which is `member` or `operator`,
+`issued_by`, which names the member who obtained it and is `null`
+where you did, `redeemed_at`, `null` until it is used, and
+`revoked`. **Never the secret.**
 
 It lists the spent and the revoked ones too, which is why it is
 called listing invitations and not listing open ones: nothing is

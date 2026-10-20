@@ -86,7 +86,8 @@ instead.
 `POST /realms/{realm}/teams/{team}/invitations` with `member_name`,
 `member_mission` and `display_name`. It answers with the
 `display_name`, the `invitation` in clear text, **shown once**, and
-`team_name`.
+beside it whom it is for: `member_name`, `team_name` and
+`realm_name`.
 
 Whoever redeems it becomes a **realm master** — with no parameter
 and no choice. This is your way of putting the first participant

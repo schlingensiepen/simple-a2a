@@ -35,8 +35,9 @@ with status 409.
 `POST /realms/{realm}/teams/{team}/invitations` obtains an
 invitation into a team: `member_name`, `member_mission`,
 `display_name`, and out comes the `display_name`, the `invitation` in
-clear text, and `team_name`. Whoever redeems it becomes a realm
-master, with no parameter and no choice.
+clear text, and beside it whom it is for: `member_name`, `team_name`
+and `realm_name`. Whoever redeems it becomes a realm master, with no
+parameter and no choice.
 
 `POST /realms/{realm}/observer-tokens` issues an **observer token**
 for a realm: `display_name` in, and out comes the `display_name` and

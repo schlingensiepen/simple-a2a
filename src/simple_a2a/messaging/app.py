@@ -625,6 +625,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
             return {
                 "display_name": body.display_name,
                 "invitation": voucher,
+                "member_name": body.member_name,
                 "team_name": team.name if team else None,
             }
 
@@ -641,7 +642,11 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
             voucher = access.obtain_service_invitation(
                 context, caller, service_name=body.service_name, display_name=body.display_name
             )
-            return {"display_name": body.display_name, "invitation": voucher}
+            return {
+                "display_name": body.display_name,
+                "invitation": voucher,
+                "service_name": body.service_name,
+            }
 
     @app.post(
         "/invitations/redeem",

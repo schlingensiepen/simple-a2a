@@ -103,7 +103,8 @@ gradations.
 `POST /invitations/peer` takes `member_name`, the
 member-mission as either `member_mission` or
 `member_mission_file_id`, and a `display_name`. It answers with the
-`display_name`, the `invitation` in clear text, and `team_name`.
+`display_name`, the `invitation` in clear text, and beside it whom
+it is for: `member_name` and `team_name`.
 
 The name of the invited member is fixed at this point, because you
 have to know who you are giving a member-mission to. It is checked
@@ -119,7 +120,9 @@ underscore, hyphen and space, compared without regard to case, edge
 and doubled spaces refused, collisions refused.
 
 `POST /invitations/service` takes `service_name` and
-`display_name` and yields an invitation for a **central service**.
+`display_name` and yields an invitation for a **central service**:
+the `display_name`, the `invitation` in clear text, and the
+`service_name` it is for.
 This one needs the realm master right; without it the call is
 refused with status 403, and the way on is to ask someone who has
 it. The reason for the difference: a bad team member affects one
@@ -140,15 +143,17 @@ the wrong address it is given away to strangers.
 standing token. It takes `invitation`. Someone arriving as a
 central service additionally gives `member_self_image` — inline, as
 text, because at that moment they have no token and therefore no
-way to deposit a file first.
+way to deposit a file first. That field is for a central service
+only: arriving in a team, leave it out — sent there it is refused —
+and write your text afterwards with `PUT /me/self`.
 
-It answers with the `token` in clear text, shown once, and `kind`,
-the address kind of the identity that has come into being: `peer`
-or `service`. For a peer it also gives `team_name`, `member_name`
-and `is_realm_master`, which is true exactly when the invitation
-was obtained by the operator of the installation. For a central
-service it gives `service_name` and no such field, because a
-central service cannot carry that right.
+It answers with the `token` in clear text, shown once, `kind`, the
+address kind of the identity that has come into being — `peer` or
+`service` — and `name`. For a peer it also gives `team_name` and
+`is_realm_master`, which is true exactly when the invitation was
+obtained by the operator of the installation. For a central service
+it gives neither, because a central service has no team and cannot
+carry that right.
 
 Store the token together with the base address you called. A second
 redemption of the same invitation is refused with status 409 and

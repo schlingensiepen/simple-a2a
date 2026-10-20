@@ -758,17 +758,18 @@ def invitations(context: Context, realm_id: str, window: Window) -> list[dict[st
         entry: dict[str, object] = {
             "display_name": record.display_name,
             "kind": record.kind,
-            "team_name": team.name if team else None,
             "target_name": record.invited_name,
             "issued_at": record.created_at,
             "issued_by_kind": record.issued_by_kind,
+            # A person only where it means somebody: an invitation the operator
+            # obtained was obtained by the installation, not by a person in a team.
+            "issued_by": record.issued_by_name if record.issued_by_kind == Kind.MEMBER else None,
             "redeemed_at": record.consumed_at,
             "revoked": record.revoked_at is not None,
         }
-        # Named only where it means somebody: an invitation the operator obtained
-        # was obtained by the installation, not by a person in a team.
-        if record.issued_by_kind == Kind.MEMBER:
-            entry["issued_by"] = record.issued_by_name
+        # A service invitation is in no team, so it has no team to name.
+        if team is not None:
+            entry["team_name"] = team.name
         found.append(entry)
     found.sort(key=lambda entry: str(entry["display_name"]).casefold())
     return window.over(found)

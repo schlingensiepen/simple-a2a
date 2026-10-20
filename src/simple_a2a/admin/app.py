@@ -266,17 +266,20 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
             return {
                 "display_name": body.display_name,
                 "invitation": voucher,
+                "member_name": body.member_name,
                 "team_name": in_team.name,
+                "realm_name": found.name,
             }
 
     @app.get(
         "/realms/{realm}/invitations",
         summary="Every invitation of one realm, used-up and revoked ones included.",
         response_model=models.InvitationList,
-        # A field that does not apply is absent rather than null: `issued_by` is
-        # named only where somebody in a team obtained it, and `redeemed_at` only
-        # once it has been used. A null would say "there is one, and it is nothing".
-        response_model_exclude_none=True,
+        # `issued_by` and `redeemed_at` are always there, `null` while empty: a reader
+        # told the fields exist went looking for them and found nothing. `team_name`
+        # stays absent for a service invitation, which is in no team, so only the
+        # fields the listing sets are written.
+        response_model_exclude_unset=True,
     )
     async def list_invitations(
         realm: RealmName,

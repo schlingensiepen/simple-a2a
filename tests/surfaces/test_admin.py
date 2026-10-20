@@ -256,9 +256,14 @@ def test_an_invitation_is_shown_once_and_makes_a_realm_master(admin: TestClient)
     )
 
     body = answer.json()
-    assert set(body) == {"display_name", "invitation", "team_name"}
+    assert set(body) == {"display_name", "invitation", "member_name", "team_name", "realm_name"}
     assert len(body["invitation"]) == 43
-    assert body["team_name"] == "kitchen"
+    # Beside the secret, whom it is for: the one answer that shows it says it all.
+    assert (body["member_name"], body["team_name"], body["realm_name"]) == (
+        "Anna",
+        "kitchen",
+        "household",
+    )
     # And it is never shown again: the listing names it by its handle.
     listed = admin.get("/realms/household/invitations").json()["invitations"]
     assert body["invitation"] not in str(listed)
@@ -281,9 +286,36 @@ def test_the_invitation_listing_names_the_handle_and_never_the_secret(
     assert entry["team_name"] == "kitchen"
     assert entry["issued_by_kind"] == "operator"
     assert entry["revoked"] is False
-    # Absent rather than null: a field that does not apply says nothing at all.
-    assert "issued_by" not in entry
-    assert "redeemed_at" not in entry
+    # There and null while empty: a reader told the fields exist finds them.
+    assert entry["issued_by"] is None
+    assert entry["redeemed_at"] is None
+
+
+def test_an_invitation_listing_shows_when_it_was_redeemed_and_by_whom_it_was_issued(
+    admin: TestClient, participants: TestClient
+) -> None:
+    founded(admin)
+    voucher = admin.post(
+        "/realms/household/teams/kitchen/invitations",
+        json={"member_name": "Anna", "member_mission": "Lists.", "display_name": "voucher"},
+    ).json()["invitation"]
+    anna = participants.post("/invitations/redeem", json={"invitation": voucher}).json()["token"]
+    participants.post(
+        "/invitations/service",
+        json={"service_name": "weather", "display_name": "for weather"},
+        headers={"Authorization": f"Bearer {anna}"},
+    )
+
+    listed = {
+        entry["display_name"]: entry
+        for entry in admin.get("/realms/household/invitations").json()["invitations"]
+    }
+
+    assert listed["voucher"]["redeemed_at"].endswith("Z")
+    assert listed["voucher"]["issued_by"] is None
+    assert listed["for weather"]["issued_by"] == "Anna"
+    assert listed["for weather"]["redeemed_at"] is None
+    assert "team_name" not in listed["for weather"], "a service invitation is in no team"
 
 
 def test_an_invitation_is_revoked_by_its_handle(admin: TestClient) -> None:

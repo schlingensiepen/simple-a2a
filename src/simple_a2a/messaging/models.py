@@ -345,6 +345,18 @@ class InvitationGiven(BaseModel):
         "neither half is any use alone.",
         examples=["the-voucher-is-43-characters-of-base64url"],
     )
+    member_name: str | None = Field(
+        default=None,
+        description="Who the identity will be once the invitation is redeemed, for an "
+        "invitation into your team. Absent for a central service, which has service_name.",
+        examples=["Clara"],
+    )
+    service_name: str | None = Field(
+        default=None,
+        description="What the central service will be called, for an invitation into the "
+        "registry. Absent for an invitation into your team, which has member_name.",
+        examples=["weather"],
+    )
     team_name: str | None = Field(
         default=None,
         description="The team the invitation is for. Absent for a central service, which "
@@ -361,9 +373,11 @@ class Redeem(Input):
     )
     member_self_image: str | None = Field(
         default=None,
-        description="Only when you are becoming a central service, and then it is your only "
-        "text: what you can do. Inline only — you have no token yet, so you cannot deposit a "
-        "file. PUT /me/self is open to you immediately afterwards.",
+        description="Applies only when you redeem as a **central service** — an invitation "
+        "obtained with POST /invitations/service — and then it is required, because it is "
+        "your only text: what you can do. Inline only — you have no token yet, so you cannot "
+        "deposit a file. Redeeming an invitation into a team, leave it out: sent there it is "
+        "refused, and you write your text afterwards with PUT /me/self.",
         examples=["I answer questions about the weather."],
     )
 

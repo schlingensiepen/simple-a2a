@@ -849,3 +849,54 @@ def test_the_entry_and_the_guide_say_where_data_can_be_asked_for(
     for address in ("/me", "/peers"):
         assert f"{address}` —" in entry, address
     assert "`entries`" in concepts
+
+
+# ------------------------------------------------------------- what an invitation says
+
+
+def test_an_invitation_names_whom_it_is_for_and_never_the_realm(
+    admin: TestClient, participants: TestClient
+) -> None:
+    """The secret is shown once, so the same answer says whom it is for.
+
+    The realm is the one thing it leaves out: on this surface the realm is the universe.
+    """
+    a_team(admin)
+    anna = joined(admin, participants, "Anna")
+
+    peer = participants.post(
+        "/invitations/peer",
+        json={"member_name": "Clara", "member_mission": "m", "display_name": "for Clara"},
+        headers=bearer(anna),
+    ).json()
+    service = participants.post(
+        "/invitations/service",
+        json={"service_name": "weather", "display_name": "for weather"},
+        headers=bearer(anna),
+    ).json()
+
+    assert (peer["member_name"], peer["team_name"]) == ("Clara", "kitchen")
+    assert service["service_name"] == "weather"
+    assert "team_name" not in service and "member_name" not in service
+    assert "household" not in str(peer) + str(service)
+
+
+def test_the_description_says_the_self_image_at_redemption_is_for_a_service_only(
+    admin: TestClient, participants: TestClient
+) -> None:
+    document = participants.get("/openapi.json").json()
+    said = document["components"]["schemas"]["Redeem"]["properties"]["member_self_image"][
+        "description"
+    ]
+    a_team(admin)
+
+    refused = participants.post(
+        "/invitations/redeem",
+        json={"invitation": invited(admin, "Anna"), "member_self_image": "I cook."},
+    )
+
+    assert "only when you redeem as a **central service**" in said
+    assert "PUT /me/self" in said
+    assert refused.status_code == 400
+    assert refused.json()["type"] == "invalid-input"
+    assert "A **team member** does not send that field at all" in refused.json()["message"]

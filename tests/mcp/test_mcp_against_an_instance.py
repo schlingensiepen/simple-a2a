@@ -1536,3 +1536,16 @@ def test_listing_asks_afresh(instance: Instance, programs: Any) -> None:
     assert (before["name"], before["team"], before["state"]) == ("Quirin", "kitchen", "accepted")
     assert before["is_realm_master"] is True
     assert after["state"] == "refused: token-revoked"
+
+
+def test_the_redeem_tool_says_the_self_image_is_for_a_central_service_only(
+    instance: Instance, programs: Any
+) -> None:
+    """Inherited from the description, not written here: the tool says what the field says."""
+    anna = programs(instance.anna)
+    anna.initialize()
+
+    tools = {tool["name"]: tool for tool in anna.ask("tools/list")["result"]["tools"]}
+
+    said = tools["redeem"]["inputSchema"]["properties"]["member_self_image"]["description"]
+    assert "only when you redeem as a **central service**" in said
