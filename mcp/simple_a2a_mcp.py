@@ -35,7 +35,10 @@ long.
 request carries its version in `_meta`, `server/discover` replaces the handshake,
 and `subscriptions/listen` replaces `resources/subscribe`. Harnesses in use still
 open with `initialize`. Both are answered, each in its own terms, because an MCP
-server that only one kind of harness can start is a third of an offer.
+server that only one kind of harness can start is a third of an offer. A harness
+that asks `server/discover` first and settles on whatever answers can be held to
+the handshake with `--protocol initialize`, the one argument this program takes —
+Claude Code delivers channel notifications only on a connection opened that way.
 
 **New mail is looked for, and told in the ways the harness offers.** The service
 never contacts anybody. This program looks at each identity's inbox at intervals and
@@ -94,6 +97,18 @@ HTTP_TIMEOUT = 120
 MODERN = ("2026-07-28",)
 LEGACY = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 SUPPORTED = MODERN + LEGACY
+
+#: Which of the two generations are answered, chosen with `--protocol`. The other
+#: one's methods do not exist, so a client that tries it falls back to this one.
+PROTOCOLS = {
+    "both": SUPPORTED,
+    "initialize": LEGACY,
+    "discover": MODERN,
+}
+PROTOCOL_DEFAULT = "both"
+#: Methods of one generation only: declined when that generation is switched off.
+MODERN_ONLY = ("server/discover", "subscriptions/listen")
+LEGACY_ONLY = ("initialize", "ping", "resources/subscribe", "resources/unsubscribe")
 
 META_VERSION = "io.modelcontextprotocol/protocolVersion"
 META_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
@@ -1328,8 +1343,12 @@ class Server:
         tools: list[Operation],
         offered: dict[str, tuple[str, str, str, str]],
         first_address: str,
+        protocol: str = PROTOCOL_DEFAULT,
     ) -> None:
         self.settings = settings
+        #: Which generations are answered, and the revisions that makes.
+        self.protocol = protocol
+        self.supported = PROTOCOLS[protocol]
         self.tools = {operation.name: operation for operation in tools}
         self.order = [operation.name for operation in tools]
         for name in OWN_TOOLS:
@@ -1586,6 +1605,11 @@ class Server:
     def request(self, identifier: Any, method: str, params: Any) -> dict[str, Any] | None:
         if not isinstance(params, dict):
             raise ProtocolError(INVALID_PARAMS, "params has to be an object.")
+        if (self.protocol == "initialize" and method in MODERN_ONLY) or (
+            self.protocol == "discover" and method in LEGACY_ONLY
+        ):
+            # Declined as if it did not exist, which is what makes a client fall back.
+            raise ProtocolError(METHOD_NOT_FOUND, f"There is no method {method!r} here.")
         if method == "initialize":
             return self.initialize(params)
         era = self.era_of(method, params)
@@ -1634,11 +1658,11 @@ class Server:
         meta = params.get("_meta")
         declared = meta.get(META_VERSION) if isinstance(meta, dict) else None
         if declared is not None:
-            if declared not in SUPPORTED:
+            if declared not in self.supported:
                 raise ProtocolError(
                     UNSUPPORTED_VERSION,
                     "Unsupported protocol version",
-                    {"supported": list(SUPPORTED), "requested": declared},
+                    {"supported": list(self.supported), "requested": declared},
                 )
             if declared in MODERN and not isinstance(meta.get(META_CAPABILITIES), dict):
                 raise ProtocolError(
@@ -1647,12 +1671,16 @@ class Server:
             return "modern" if declared in MODERN else "legacy"
         if self.negotiated is not None or method == "ping":
             return "legacy"
+        speaks = []
+        if self.protocol != "initialize":
+            speaks.append(f"{', '.join(MODERN)} per request")
+        if self.protocol != "discover":
+            speaks.append(f"{', '.join(LEGACY)} after initialize")
         raise ProtocolError(
             INVALID_PARAMS,
             f"This request carries no {META_VERSION!r} in _meta, and no initialize came "
-            f"before it. This server speaks {', '.join(MODERN)} per request, and "
-            f"{', '.join(LEGACY)} after initialize.",
-            {"supported": list(SUPPORTED)},
+            f"before it. This server speaks {' and '.join(speaks)}.",
+            {"supported": list(self.supported)},
         )
 
     # -- the methods -----------------------------------------------------
@@ -1752,7 +1780,7 @@ class Server:
 
     def discover(self) -> dict[str, Any]:
         return {
-            "supportedVersions": list(SUPPORTED),
+            "supportedVersions": list(self.supported),
             "capabilities": self.capabilities(),
             "instructions": self.instructions(),
             "ttlMs": 0,
@@ -2226,7 +2254,9 @@ def _error(identifier: Any, code: int, message: str, data: Any = None) -> dict[s
 # ------------------------------------------------------------------ start
 
 
-def start(environment: dict[str, str] | os._Environ[str]) -> Server:
+def start(
+    environment: dict[str, str] | os._Environ[str], protocol: str = PROTOCOL_DEFAULT
+) -> Server:
     """Everything that has to hold before the first message is read."""
     settings = Settings.from_environment(environment)
     first = settings.bare_address or settings.entries[0].address
@@ -2249,7 +2279,7 @@ def start(environment: dict[str, str] | os._Environ[str]) -> Server:
                 "of simple-a2a. The address has to name that surface.",
                 1,
             )
-        server = Server(settings, tools, offered, first)
+        server = Server(settings, tools, offered, first, protocol)
     except DescriptionError as failed:
         raise StartRefused(f"the interface description cannot be mapped: {failed}", 1) from None
     for entry in settings.entries:
@@ -2266,17 +2296,42 @@ def start(environment: dict[str, str] | os._Environ[str]) -> Server:
     return server
 
 
+def protocol_of(given: list[str]) -> str:
+    """The one argument there is, `--protocol`, or the reason it cannot be read.
+
+    Everything else is refused: addresses and tokens would stand in the process list.
+    """
+    allowed = ", ".join(PROTOCOLS)
+    if not given:
+        return PROTOCOL_DEFAULT
+    if len(given) == 2 and given[0] == "--protocol":
+        value: str | None = given[1]
+    elif len(given) == 1 and given[0].startswith("--protocol="):
+        value = given[0].removeprefix("--protocol=")
+    elif given == ["--protocol"]:
+        value = None
+    else:
+        raise StartRefused(
+            "takes no arguments but --protocol — addresses and tokens would stand in the "
+            f"process list. Set {ADDRESS_VARIABLE} and {TOKEN_VARIABLE}, or "
+            f"{IDENTITIES_VARIABLE}, in the environment instead; README.md says how. "
+            f"--protocol takes one of {allowed}.",
+            2,
+        )
+    if value not in PROTOCOLS:
+        raise StartRefused(
+            f"--protocol takes one of {allowed}"
+            + ("." if value is None else f", not {_quoted(value[:64])}."),
+            2,
+        )
+    return value
+
+
 def main(arguments: list[str] | None = None) -> int:
     given = sys.argv[1:] if arguments is None else arguments
-    if given:
-        log(
-            "takes no arguments — addresses and tokens would stand in the process list. Set "
-            f"{ADDRESS_VARIABLE} and {TOKEN_VARIABLE}, or {IDENTITIES_VARIABLE}, in the "
-            "environment instead; README.md says how."
-        )
-        return 2
     try:
-        server = start(os.environ)
+        protocol = protocol_of(given)
+        server = start(os.environ, protocol)
     except StartRefused as refused:
         log(str(refused))
         return refused.status
@@ -2285,7 +2340,15 @@ def main(arguments: list[str] | None = None) -> int:
         if server.identities
         else "no identity yet — only redeeming will work"
     )
-    log(f"{len(server.tools)} tools for {', '.join(server.addresses())}, {who}; waiting")
+    answers = {
+        "both": "initialize and server/discover",
+        "initialize": "initialize only, server/discover declined",
+        "discover": "server/discover only, initialize declined",
+    }[protocol]
+    log(
+        f"{len(server.tools)} tools for {', '.join(server.addresses())}, {who}; "
+        f"protocol {protocol} ({answers}); waiting"
+    )
     server.run(sys.stdin.buffer, sys.stdout.buffer)
     return 0
 

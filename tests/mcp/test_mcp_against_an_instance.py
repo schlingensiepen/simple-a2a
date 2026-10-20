@@ -196,9 +196,9 @@ def instance(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Instance]:
 class Program:
     """The MCP program as a harness has it: a subprocess, and two pipes."""
 
-    def __init__(self, environment: dict[str, str]) -> None:
+    def __init__(self, environment: dict[str, str], arguments: tuple[str, ...] = ()) -> None:
         self.process = subprocess.Popen(
-            [sys.executable, str(PROGRAM)],
+            [sys.executable, str(PROGRAM), *arguments],
             env={"PATH": os.environ.get("PATH", ""), **environment},
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -292,7 +292,10 @@ def programs(instance: Instance) -> Iterator[Any]:
     started: list[Program] = []
 
     def start(
-        token: str | None, identities: list[dict[str, str]] | None = None, **extra: str
+        token: str | None,
+        identities: list[dict[str, str]] | None = None,
+        arguments: tuple[str, ...] = (),
+        **extra: str,
     ) -> Program:
         environment = dict(extra)
         if identities is not None:
@@ -301,7 +304,7 @@ def programs(instance: Instance) -> Iterator[Any]:
             environment["A2A_MCP_ADDRESS"] = instance.base
             if token is not None:
                 environment["A2A_MCP_TOKEN"] = token
-        program = Program(environment)
+        program = Program(environment, arguments)
         started.append(program)
         return program
 
@@ -925,17 +928,115 @@ def test_a_redirect_is_never_followed(tmp_path: Path) -> None:
     assert arrived == [], "nothing reached the redirect's target, least of all the token"
 
 
-def test_arguments_are_refused_because_they_stand_in_the_process_list() -> None:
+def test_by_default_both_generations_are_answered_and_the_start_says_so(
+    instance: Instance, programs: Any
+) -> None:
+    anna = programs(instance.anna, arguments=("--protocol", "both"))
+
+    found = anna.ask("server/discover", {"_meta": META})["result"]
+    opened = anna.initialize()["result"]
+    _, stderr = anna.close()
+
+    assert found["supportedVersions"][0] == MODERN and "2025-11-25" in found["supportedVersions"]
+    assert opened["protocolVersion"] == "2025-11-25"
+    assert "protocol both (initialize and server/discover)" in stderr
+
+
+def test_held_to_initialize_the_modern_generation_does_not_exist(
+    instance: Instance, programs: Any
+) -> None:
+    """So a harness that asks server/discover first falls back to the handshake."""
+    anna = programs(instance.anna, arguments=("--protocol=initialize",))
+
+    discover = anna.ask("server/discover", {"_meta": META})
+    listen = anna.ask("subscriptions/listen", {"_meta": META})
+    modern = anna.ask("tools/list", {"_meta": META})
+    opened = anna.initialize()["result"]
+    listed = anna.ask("tools/list")["result"]
+    subscribed = anna.ask("resources/subscribe", {"uri": "simple-a2a://default/inbox"})
+    _, stderr = anna.close()
+
+    assert discover["error"]["code"] == -32601
+    assert listen["error"]["code"] == -32601
+    assert modern["error"]["code"] == -32022
+    assert MODERN not in modern["error"]["data"]["supported"]
+    assert opened["protocolVersion"] == "2025-11-25"
+    assert opened["capabilities"]["experimental"] == {"claude/channel": {}}
+    assert opened["capabilities"]["resources"]["subscribe"] is True
+    assert len(listed["tools"]) == 28 + len(OWN_TOOLS)
+    assert subscribed["result"] == {}
+    assert "protocol initialize" in stderr
+
+
+def test_held_to_discover_the_handshake_does_not_exist(instance: Instance, programs: Any) -> None:
+    anna = programs(instance.anna, arguments=("--protocol", "discover"))
+
+    opened = anna.ask("initialize", {"protocolVersion": "2025-11-25", "capabilities": {}})
+    ping = anna.ask("ping")
+    subscribe = anna.ask("resources/subscribe", {"uri": "simple-a2a://default/inbox"})
+    old = anna.ask("tools/list", {"_meta": {**META, META_KEY: "2025-11-25"}})
+    found = anna.ask("server/discover", {"_meta": META})["result"]
+    listed = anna.ask("tools/list", {"_meta": META})["result"]
+    _, stderr = anna.close()
+
+    assert opened["error"]["code"] == -32601
+    assert ping["error"]["code"] == -32601
+    assert subscribe["error"]["code"] == -32601
+    assert old["error"]["code"] == -32022
+    assert found["supportedVersions"] == [MODERN]
+    assert found["capabilities"]["experimental"] == {"claude/channel": {}}
+    assert len(listed["tools"]) == 28 + len(OWN_TOOLS)
+    assert "protocol discover" in stderr
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--protocol", "modern"],
+        ["--protocol=handshake"],
+        ["--protocol"],
+        ["--protocol="],
+        ["--protocol", "both", "--protocol", "both"],
+    ],
+)
+def test_a_protocol_that_is_not_one_of_the_three_is_refused(arguments: list[str]) -> None:
     started = subprocess.run(
-        [sys.executable, str(PROGRAM), "--token", "secret-on-the-command-line"],
-        env={"PATH": os.environ.get("PATH", "")},
+        [sys.executable, str(PROGRAM), *arguments],
+        env={"PATH": os.environ.get("PATH", ""), "A2A_MCP_ADDRESS": "http://127.0.0.1:9"},
+        input=b"",
         capture_output=True,
         timeout=PATIENCE,
         check=False,
     )
 
     assert started.returncode == 2
-    assert "A2A_MCP_TOKEN" in started.stderr.decode()
+    assert started.stdout == b""
+    assert "both, initialize, discover" in started.stderr.decode()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--token", "secret-on-the-command-line"],
+        ["--protocol", "initialize", "--token", "secret-on-the-command-line"],
+        ["secret-on-the-command-line"],
+    ],
+)
+def test_arguments_but_the_protocol_are_refused_because_they_stand_in_the_process_list(
+    arguments: list[str],
+) -> None:
+    started = subprocess.run(
+        [sys.executable, str(PROGRAM), *arguments],
+        env={"PATH": os.environ.get("PATH", "")},
+        capture_output=True,
+        timeout=PATIENCE,
+        check=False,
+    )
+
+    told = started.stderr.decode()
+    assert started.returncode == 2
+    assert "A2A_MCP_TOKEN" in told and "--protocol" in told
+    assert "secret-on-the-command-line" not in told
 
 
 def test_an_address_without_a_description_is_refused_clearly() -> None:

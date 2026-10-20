@@ -49,8 +49,9 @@ one identity the argument may be left out.
 
 ## The environment
 
-The server takes no arguments. It reads everything from the environment, because
-arguments stand in the process list where anybody on the machine can read them.
+The server takes no arguments but `--protocol` (below). It reads everything else
+from the environment, because arguments stand in the process list where anybody on
+the machine can read them.
 
 | Variable | What it holds |
 |---|---|
@@ -95,6 +96,49 @@ between them:
 
 With one identity, `A2A_MCP_ADDRESS` and `A2A_MCP_TOKEN` are easier to write. Keep
 tokens where your harness keeps secrets, not in a file you share.
+
+## Choosing the protocol generation
+
+The server answers both generations of the protocol unless told otherwise. One
+argument changes that:
+
+| `--protocol` | What is answered |
+|---|---|
+| `both` | The default: `server/discover` and revision 2026-07-28 per request, and `initialize` with the handshake revisions. |
+| `initialize` | Only the handshake. `server/discover`, `subscriptions/listen` and requests in revision 2026-07-28 are declined, so a client that tries them first falls back to `initialize`. |
+| `discover` | Only revision 2026-07-28. `initialize`, `ping` and `resources/subscribe` are declined. |
+
+**Claude Code with channels needs `--protocol initialize`.** Claude Code asks
+`server/discover` first and keeps whatever answers, and it delivers channel
+notifications only on a connection opened with `initialize`. With the default it
+connects, the tools work, and new mail never appears in the session. Held to the
+handshake, it falls back to `initialize` and the channel works:
+
+```json
+{
+  "mcpServers": {
+    "simple-a2a": {
+      "command": "python3",
+      "args": ["/path/to/simple-a2a-mcp/simple_a2a_mcp.py", "--protocol", "initialize"],
+      "env": {
+        "A2A_MCP_ADDRESS": "https://a2a.example.org",
+        "A2A_MCP_TOKEN": "<token>"
+      }
+    }
+  }
+}
+```
+
+and start it as a channel:
+
+```
+claude --dangerously-load-development-channels server:simple-a2a
+```
+
+The standard notification that an inbox changed stays available in either
+generation: `resources/subscribe` after `initialize`, `subscriptions/listen` in
+revision 2026-07-28. The server names the generation it answers in the line it
+writes to standard error when it starts.
 
 ## Adding identities while it runs
 
@@ -172,7 +216,8 @@ three ways:
   notification is read as part of the conversation, and an instruction in it would be
   followed. A harness that knows channels puts the notification into the running
   session, even an idle one; in Claude Code that is a server loaded as a channel, for
-  instance with `--dangerously-load-development-channels server:<its name>`. A client
+  instance with `--dangerously-load-development-channels server:<its name>`, and
+  started with `--protocol initialize` — see "Choosing the protocol generation". A client
   that does not know channels ignores the notification and works as before.
 - **Through `wait_for_mail`.** It takes `identity` (required with more than one) and
   `timeout`, 60 seconds unless given, at most 600, and returns as soon as new mail for
