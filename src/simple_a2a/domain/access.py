@@ -704,15 +704,30 @@ def teams(context: Context, realm_id: str, window: Window) -> list[dict[str, obj
 def members(
     context: Context, realm_id: str, team_id: str, window: Window
 ) -> list[dict[str, object]]:
-    """Management state and no content: who is there, who may appoint, whose token is gone."""
-    found = [
-        {
-            "member_name": located.record.name,
-            "is_realm_master": located.record.is_realm_master,
-            "token_revoked": located.state is State.REVOKED,
-        }
-        for located in context.holdings.members(realm_id, team_id)
-    ]
+    """Management state and no content: who is there, who may appoint, whose token is gone.
+
+    With the moments of each: when they joined, when their token was taken, and when
+    the right was last given and taken. A moment the holdings do not know — they
+    were written before it was kept — is `None`, never a guess.
+    """
+    found = []
+    for located in context.holdings.members(realm_id, team_id):
+        granted, deposed = context.holdings.realm_master_moments(
+            realm_id, team_id, located.record.id, located.state
+        )
+        found.append(
+            {
+                "member_name": located.record.name,
+                "is_realm_master": located.record.is_realm_master,
+                "token_revoked": located.state is State.REVOKED,
+                "joined_at": located.record.created_at,
+                "token_revoked_at": located.record.revoked_at
+                if located.state is State.REVOKED
+                else None,
+                "realm_master_granted_at": granted,
+                "realm_master_revoked_at": deposed,
+            }
+        )
     found.sort(key=lambda entry: str(entry["member_name"]).casefold())
     return window.over(found)
 

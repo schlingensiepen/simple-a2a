@@ -60,6 +60,8 @@ from simple_a2a.store.layout import (
     ENVELOPE,
     MAILBOXES,
     META,
+    REALM_MASTER_GRANTED_AT,
+    REALM_MASTER_REVOKED_AT,
     REVOKED_AT,
     Layout,
     State,
@@ -329,11 +331,11 @@ class Holdings:
             token_hash=token_hash(token),
             is_realm_master=is_realm_master,
         )
-        self._put(
-            self.layout.member(realm_id, team_id, member_id, State.ACTIVE),
-            record,
-            {MISSION: mission, SELF_IMAGE: self_image},
-        )
+        texts: dict[str, str | bytes] = {MISSION: mission, SELF_IMAGE: self_image}
+        if is_realm_master:
+            # Arriving with the right is being given it, at the moment of arriving.
+            texts[REALM_MASTER_GRANTED_AT] = record.created_at + "\n"
+        self._put(self.layout.member(realm_id, team_id, member_id, State.ACTIVE), record, texts)
         self.register_token(
             token,
             TokenPointer(kind="peer", realm_id=realm_id, team_id=team_id, subject_id=member_id),
@@ -423,8 +425,27 @@ class Holdings:
                 )
             except FileNotFoundError:
                 continue
+            if located.record.is_realm_master != value:
+                # Stamped only when the right really changed: appointing a realm
+                # master again is no new grant, and its moment stays what it was.
+                self._write_into(
+                    lambda s: self.layout.member(realm_id, team_id, member_id, s),
+                    located.state,
+                    REALM_MASTER_GRANTED_AT if value else REALM_MASTER_REVOKED_AT,
+                    now_iso() + "\n",
+                )
             return True
         return False
+
+    def realm_master_moments(
+        self, realm_id: str, team_id: str, member_id: str, state: State
+    ) -> tuple[str | None, str | None]:
+        """When the right was last given and last taken, each `None` where unknown."""
+        directory = self.layout.member(realm_id, team_id, member_id, state)
+        return (
+            self._claimed(directory / REALM_MASTER_GRANTED_AT),
+            self._claimed(directory / REALM_MASTER_REVOKED_AT),
+        )
 
     # --------------------------------------------------------------- services
 

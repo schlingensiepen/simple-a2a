@@ -35,9 +35,18 @@ contain spaces.
   name the addresses of their two texts. Asked with
   `Accept: application/json`, it answers the same window as data:
   `entries`, each with `kind` (always `peer`), `name`,
-  `is_realm_master` and `token_revoked`.
+  `is_realm_master` and `token_revoked`, and the moments: `joined_at`,
+  `token_revoked_at`, `realm_master_granted_at` and
+  `realm_master_revoked_at` — the last two are the latest time the
+  right was given and taken, so a grant later than the revocation
+  means it was given back.
 - `GET /teams/{team}/peers/{name}` — one member: name, whether realm
-  master, whether revoked, and the addresses of the two texts.
+  master, whether revoked, the same moments, and the addresses of the
+  two texts.
+
+A moment the installation did not keep — the right given or taken
+before it began to record that — is `null` in the data and "not
+recorded" in the prose. It is never filled in with a guess.
 - `GET /teams/{team}/peers/{name}/mission` — their member-mission,
   raw: what they were brought in for, set when they joined and static
   since.

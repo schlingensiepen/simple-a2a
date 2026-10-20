@@ -280,14 +280,25 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         team: TeamName, name: MemberName, request: Request, caller: Observer = watcher_of
     ) -> Response:
         with guard("GET /teams/{team}/peers/{name}"):
-            located = _peer(context, caller, team_of(caller, team), name)
+            team_id = team_of(caller, team)
+            located = _peer(context, caller, team_id, name)
+            granted, deposed = context.holdings.realm_master_moments(
+                caller.realm_id, team_id, located.record.id, located.state
+            )
             return http.prose(
                 directories.peer(
                     name=located.record.name,
                     is_realm_master=located.record.is_realm_master,
                     revoked=located.record.revoked_at is not None,
                     prefix=f"/teams/{_quote(team)}/peers",
-                    closing=(
+                    closing=prose.moments(
+                        joined=located.record.created_at,
+                        token_revoked=located.record.revoked_at,
+                        is_realm_master=located.record.is_realm_master,
+                        granted=granted,
+                        deposed=deposed,
+                    )
+                    + (
                         f"What they have said is at `GET /teams/{_quote(team)}/traffic` with "
                         f"`sender_kind=peer` and `sender_name={located.record.name}`."
                     ),
@@ -503,6 +514,10 @@ def _member(entry: dict[str, object]) -> dict[str, object]:
         "name": entry["member_name"],
         "is_realm_master": entry["is_realm_master"],
         "token_revoked": entry["token_revoked"],
+        "joined_at": entry["joined_at"],
+        "token_revoked_at": entry["token_revoked_at"],
+        "realm_master_granted_at": entry["realm_master_granted_at"],
+        "realm_master_revoked_at": entry["realm_master_revoked_at"],
     }
 
 

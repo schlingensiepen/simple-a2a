@@ -475,3 +475,56 @@ def test_the_entry_and_the_guide_say_where_data_can_be_asked_for(
     assert "Accept: application/json" in entry
     assert "/teams` —" in entry and "/teams/{team}/peers` —" in entry
     assert "`entries`" in concepts
+
+
+def test_the_observer_sees_when_a_member_joined_and_what_changed_since(
+    admin: TestClient, participants: TestClient, observation: TestClient, context
+) -> None:
+    """Invited, redeemed, appointed, deposed, revoked: four moments, each one shown."""
+    eye = bearer(watching(admin))
+    anna = member(admin, participants, "Anna")["token"]
+    voucher = participants.post(
+        "/invitations/peer",
+        json={"member_name": "Clara", "member_mission": "m", "display_name": "for Clara"},
+        headers=bearer(anna),
+    ).json()["invitation"]
+    participants.post("/invitations/redeem", json={"invitation": voucher})
+    participants.post("/peers/Clara/realmmaster", headers=bearer(anna))
+    admin.delete("/realms/household/teams/kitchen/members/Clara/realmmaster")
+    admin.delete("/realms/household/teams/kitchen/members/Clara/token")
+
+    entries = observation.get(
+        "/teams/kitchen/peers", headers=eye | {"Accept": "application/json"}
+    ).json()["entries"]
+    clara = next(entry for entry in entries if entry["name"] == "Clara")
+    page = observation.get("/teams/kitchen/peers/Clara", headers=eye).text
+
+    joined, granted = clara["joined_at"], clara["realm_master_granted_at"]
+    deposed, revoked = clara["realm_master_revoked_at"], clara["token_revoked_at"]
+    assert all(moment and moment.endswith("Z") for moment in (joined, granted, deposed, revoked))
+    assert joined <= granted <= deposed <= revoked
+    for moment in (joined, granted, deposed, revoked):
+        assert moment in page
+    assert clara["is_realm_master"] is False and clara["token_revoked"] is True
+
+
+def test_a_moment_the_holdings_do_not_know_is_null_and_not_invented(
+    admin: TestClient, participants: TestClient, observation: TestClient, context
+) -> None:
+    """A realm master from before the moments were kept: the right is there, its time is not."""
+    eye = bearer(watching(admin))
+    member(admin, participants, "Anna")
+    for stamp in context.holdings.layout.realms.rglob("realm-master-granted-at"):
+        stamp.unlink()
+
+    anna = observation.get(
+        "/teams/kitchen/peers", headers=eye | {"Accept": "application/json"}
+    ).json()["entries"][0]
+    page = observation.get("/teams/kitchen/peers/Anna", headers=eye).text
+
+    assert anna["is_realm_master"] is True
+    assert anna["realm_master_granted_at"] is None
+    assert anna["realm_master_revoked_at"] is None
+    assert anna["token_revoked_at"] is None
+    assert anna["joined_at"].endswith("Z")
+    assert "Realm master right last given: not recorded." in page

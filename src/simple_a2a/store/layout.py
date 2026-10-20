@@ -32,7 +32,8 @@ Two consequences are worth stating before the tree:
               purpose               raw, exactly as delivered
               members/
                 by-name/<key>       taken for good, revoked or not
-                active/<member_id>/     meta.json, mission, self-image
+                active/<member_id>/     meta.json, mission, self-image,
+                                        realm-master-granted-at, -revoked-at
                 revoked/<member_id>/    the same, and revoked-at
               mailboxes/<member_id>/
                 inbox/<message_id>        the envelope as this member sees it
@@ -92,6 +93,15 @@ META = "meta.json"
 #: then reported "revoked" with no "when".
 REVOKED_AT = "revoked-at"
 CONSUMED_AT = "consumed-at"
+
+#: When a member last got the realm master right, and when they last lost it. A
+#: stamp file each, beside the record, for the same reason as above — but not
+#: written once: the right can be given again after it was taken, so each stamp is
+#: replaced, atomically, whenever the right really changes, and holds the latest
+#: such moment. A member from before these stamps existed has none, and the
+#: moment is then unknown rather than guessed.
+REALM_MASTER_GRANTED_AT = "realm-master-granted-at"
+REALM_MASTER_REVOKED_AT = "realm-master-revoked-at"
 
 #: The file a mailbox entry is. One per delivery, holding the envelope as its
 #: recipient sees it — which for a service means an alias where a name would be.

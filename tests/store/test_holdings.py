@@ -454,3 +454,47 @@ def test_an_identifier_with_a_hyphen_does_not_confuse_the_split(
 
     assert listed[0].delivered_at == "2026-09-27T12:00:00.000Z"
     assert listed[0].message_id == awkward
+
+
+def test_the_right_is_stamped_when_it_changes_and_only_then(
+    holdings: Holdings, realm, team, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Given on arrival, taken, given again: each stamp holds the latest real change."""
+    import simple_a2a.store.holdings as module
+
+    moments = iter(f"2026-10-20T10:00:0{n}.000Z" for n in range(1, 10))
+    monkeypatch.setattr(module, "now_iso", lambda: next(moments))
+    founder = holdings.create_member(
+        realm.id, team.id, new_id(), "Anna", token=new_id(), mission="m", is_realm_master=True
+    )
+    plain = holdings.create_member(realm.id, team.id, new_id(), "Otto", token=new_id(), mission="m")
+
+    def of(member_id: str) -> tuple[str | None, str | None]:
+        located = holdings.member(realm.id, team.id, member_id)
+        assert located is not None
+        return holdings.realm_master_moments(realm.id, team.id, member_id, located.state)
+
+    assert of(founder.id) == (founder.created_at, None), "arriving with it is being given it"
+    assert of(plain.id) == (None, None)
+
+    holdings.set_realm_master(realm.id, team.id, plain.id, True)  # :03
+    holdings.set_realm_master(realm.id, team.id, plain.id, True)  # no change, no stamp
+    holdings.set_realm_master(realm.id, team.id, plain.id, False)  # :04
+    assert of(plain.id) == ("2026-10-20T10:00:03.000Z", "2026-10-20T10:00:04.000Z")
+
+    holdings.revoke_member(realm.id, team.id, plain.id)  # :05, the token
+    holdings.set_realm_master(realm.id, team.id, plain.id, True)  # :06, followed into revoked
+    assert of(plain.id) == ("2026-10-20T10:00:06.000Z", "2026-10-20T10:00:04.000Z")
+
+
+def test_a_member_from_before_the_stamps_has_unknown_moments(
+    holdings: Holdings, realm, team
+) -> None:
+    """Holdings written before the stamps existed: nothing to read, and nothing invented."""
+    member = holdings.create_member(
+        realm.id, team.id, new_id(), "Anna", token=new_id(), mission="m", is_realm_master=True
+    )
+    directory = holdings.layout.member(realm.id, team.id, member.id, State.ACTIVE)
+    (directory / "realm-master-granted-at").unlink()
+
+    assert holdings.realm_master_moments(realm.id, team.id, member.id, State.ACTIVE) == (None, None)

@@ -63,3 +63,26 @@ def team(*, team_name: str, member_count: int, purpose_set: bool) -> str:
   stored right and a mark where a token has been revoked.
 - `GET /teams/{_quote(team_name)}/traffic` — what has been said in it, newest first.
 """
+
+
+def moments(
+    *,
+    joined: str,
+    token_revoked: str | None,
+    is_realm_master: bool,
+    granted: str | None,
+    deposed: str | None,
+) -> str:
+    """When a member arrived, and when what they carry changed — as far as it is known.
+
+    A moment the holdings do not have is said to be unknown rather than left out: a
+    missing line would read as "it never happened".
+    """
+    lines = [f"- Joined: {joined}."]
+    if is_realm_master or granted or deposed:
+        lines.append(f"- Realm master right last given: {granted or 'not recorded'}.")
+        if deposed:
+            lines.append(f"- Realm master right last taken: {deposed}.")
+    if token_revoked:
+        lines.append(f"- Token revoked: {token_revoked}.")
+    return "\n".join(lines) + "\n\n"

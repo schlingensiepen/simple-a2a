@@ -166,6 +166,26 @@ class MemberEntry(BaseModel):
         "because what they said is still in the traffic.",
         examples=[False],
     )
+    joined_at: str = Field(
+        description="When they joined the team, in UTC with milliseconds.",
+        examples=["2026-09-28T09:12:44.081Z"],
+    )
+    token_revoked_at: str | None = Field(
+        description="When their token was revoked, or `null` while it is valid.",
+        examples=[None],
+    )
+    realm_master_granted_at: str | None = Field(
+        description="When they were last given the realm master right — by joining with it "
+        "or by being appointed. `null` if they never had it, or if it was given before this "
+        "installation kept the moment.",
+        examples=["2026-09-28T09:12:44.081Z"],
+    )
+    realm_master_revoked_at: str | None = Field(
+        description="When the right was last taken from them. `null` if it never was, or if "
+        "it was taken before this installation kept the moment. Later than "
+        "realm_master_granted_at means they no longer carry it.",
+        examples=[None],
+    )
 
 
 class Members(BaseModel):
@@ -175,6 +195,17 @@ class Members(BaseModel):
         description="A window over the members of the team, alphabetically. `offset` and "
         "`limit` move it, as with every listing.",
         examples=[
-            [{"kind": "peer", "name": "Anna", "is_realm_master": True, "token_revoked": False}]
+            [
+                {
+                    "kind": "peer",
+                    "name": "Anna",
+                    "is_realm_master": True,
+                    "token_revoked": False,
+                    "joined_at": "2026-09-28T09:12:44.081Z",
+                    "token_revoked_at": None,
+                    "realm_master_granted_at": "2026-09-28T09:12:44.081Z",
+                    "realm_master_revoked_at": None,
+                }
+            ]
         ],
     )
