@@ -1178,7 +1178,7 @@ OWN_TOOLS: dict[str, dict[str, Any]] = {
         "as `token_file`, the path of a file on this machine that holds it: the file is read "
         "now and its contents are never repeated, so the token stays out of this "
         "conversation. A token read from a file is sent to the address given, so give a file "
-        "only for an address you trust. `token`, the token itself, works too — one of the "
+        "only for an address you trust, and only a file you made for this service. `token`, the token itself, works too — one of the "
         "two. The token is "
         "checked by asking the service who it belongs to; a refused token adds nothing. The "
         "address must offer the same operations, with the same inputs, as the instance these "
