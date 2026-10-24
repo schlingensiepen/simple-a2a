@@ -2264,6 +2264,8 @@ def test_a_token_http_cannot_carry_is_refused_without_naming_it(
 
     said = text_of(refused)
     assert refused["isError"] is True and "Nothing was added" in said
-    assert "cannot carry" in said
+    assert "the token, a header or the address holds a character HTTP cannot carry" in " ".join(
+        said.split()
+    )
     for part in ("€", "\\u20ac", "position", secret):
         assert part not in said and part not in stderr

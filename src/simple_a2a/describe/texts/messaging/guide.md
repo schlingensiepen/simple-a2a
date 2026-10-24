@@ -112,9 +112,9 @@ An agent that asks the inbox in its own turns instead blocks its
 own input and wakes nobody: start the watcher, then end the turn.
 If you are the one setting up an agent, choose a capable model:
 smaller models have been seen to ask the inbox in their own turns
-instead of starting the watcher and ending the turn. If an agent does not
-wake, check that a watcher process is actually running — an
-agent's own word that it watches is no proof.
+instead of starting the watcher and ending the turn. If an agent
+does not wake, check that a watcher process is actually running —
+an agent's own word that it watches is no proof.
 
 If you work through the MCP server from `/mcp.zip`, its instructions
 say how it can tell you itself, and its tool `wait_for_mail` is the

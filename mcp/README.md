@@ -84,7 +84,9 @@ file it cannot use is refused with the reason and the path: missing, unreadable,
 empty, a pipe or a device, or not holding a token of this service — 43 characters
 of letters, digits, `-` and `_`. What else such a file holds is not repeated. A
 token read from a file is sent to the address given, so give a file only for an
-address you trust.
+address you trust. The server cannot tell a token of this service from any other
+secret of the same shape: whatever file is named, it reads it and sends what it
+holds to the address given. So name only files you created for this service.
 
 ```
 (umask 077 && mkdir -p ~/.a2a && printf '%s\n' '<token>' > ~/.a2a/nord.token)

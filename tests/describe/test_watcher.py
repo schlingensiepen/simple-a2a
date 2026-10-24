@@ -546,6 +546,39 @@ def test_the_redemption_example_on_the_entry_keeps_the_answer_in_a_private_file(
 
 
 @pytest.mark.skipif(shutil.which("curl") is None, reason="the example needs curl")
+def test_the_redemption_example_names_no_file_when_the_address_is_unreachable(
+    tmp_path: Path,
+) -> None:
+    """Only a file the answer was written into is named; without HOME it says why."""
+    home = tmp_path / "home"
+    home.mkdir()
+    code = redemption_example().replace(REDEMPTION_PLACEHOLDER, "x")
+    path = os.environ.get("PATH", "")
+    unreachable = subprocess.run(
+        ["sh", "-c", code],
+        env={"PATH": path, "A2A_BASE": f"http://127.0.0.1:{free_port()}", "HOME": str(home)},
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=PATIENCE,
+        check=False,
+    )
+    homeless = subprocess.run(
+        ["sh", "-c", code],
+        env={"PATH": path, "A2A_BASE": f"http://127.0.0.1:{free_port()}"},
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=PATIENCE,
+        check=False,
+    )
+
+    assert unreachable.returncode != 0 and unreachable.stdout == b""
+    assert unreachable.stderr != b"", "the error says why"
+    assert list((home / ".a2a").glob("redeemed-*.json")) == []
+    assert homeless.returncode != 0 and homeless.stdout == b""
+    assert b"HOME" in homeless.stderr
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the example needs curl")
 def test_redeeming_twice_keeps_the_first_answer(instance: Instance, tmp_path: Path) -> None:
     """A second invitation does not overwrite the only copy of the first token."""
     home = tmp_path / "home"
@@ -580,7 +613,13 @@ def test_the_texts_say_how_to_hand_the_watcher_its_seen_id() -> None:
         assert "never `export" in said
         assert "if the inbox was empty, leave it unset" in said
     said = " ".join(receiving.split())
-    assert '`A2A_SEEN=$(tail -n 1 "$handled") sh watch.sh`' in said
+    # Inline, with the script's default: a fresh shell has no `$handled`, and an
+    # empty A2A_SEEN would pass silently for an unset one.
+    listed = '"${A2A_HANDLED:-$HOME/.a2a/handled}"'
+    assert f"`A2A_SEEN=$(tail -n 1 {listed}) sh watch.sh`" in said
+    assert f"`printf '%s\\n' \"<message_id>\" >> {listed}`" in said
+    prose = " ".join(FENCE.sub("", receiving).split())
+    assert '"$handled"' not in prose, "the prose relies on a variable of the script"
     assert "handled.txt" not in said, "the prose names the list the script reads"
 
 
@@ -953,6 +992,37 @@ def test_the_showing_watcher_marks_every_body_line_and_cuts_a_long_body(tmp_path
     shown = said[said.index(f"--- {long_id}") + 2 : cut_at]
     assert all(line.startswith("> ") for line in shown)
     assert sum(len(line) - len("> ") + 1 for line in shown) == 4000 + 1, "cut at 4000 bytes"
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_showing_watcher_drops_control_characters_from_bodies(tmp_path: Path) -> None:
+    """Other line breaks and escape sequences cannot pass for structure either."""
+    forged = chosen_id(8)
+    new, old = chosen_id(4), chosen_id(5)
+    body = f"first\r--- {forged}\x1b[2Ksecond\x0b--- {forged}\x0c\x1e\x7fthird\ttab\n"
+    with FixedInbox([new, old], {new: body}) as inbox:
+        finished = subprocess.run(
+            runnable(receiving_example("A2A_SHOW_BODY"), "sh", deadline_in_seconds=True),
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "A2A_BASE": inbox.base,
+                "A2A_TOKEN": "t",
+                "A2A_WATCH_MINUTES": f"{PATIENCE:g}",
+                "A2A_SEEN": old,
+                "A2A_SHOW_BODY": "1",
+            },
+            capture_output=True,
+            timeout=PATIENCE,
+            check=True,
+        )
+    out = finished.stdout.decode()
+
+    for control in ("\r", "\x1b", "\x0b", "\x0c", "\x1e", "\x7f"):
+        assert control not in out, repr(control)
+    said = out.splitlines()
+    assert [line for line in said if line.startswith("--- ")] == [f"--- {new}"]
+    (shown,) = [line for line in said if forged in line]
+    assert shown == f"> first--- {forged}[2Ksecond--- {forged}third\ttab"
 
 
 def test_the_entry_points_to_the_concepts_for_the_realm_master_field() -> None:

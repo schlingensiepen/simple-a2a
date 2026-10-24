@@ -240,6 +240,34 @@ def _not_a_token(path: Path) -> TokenFileError:
     )
 
 
+def _no_file(path: Path) -> TokenFileError:
+    return TokenFileError(
+        f"there is no file at {path}. Write the token into a file there, alone, or "
+        "give the path of the file that holds it."
+    )
+
+
+def _unreadable(path: Path, exc: BaseException) -> TokenFileError:
+    reason = getattr(exc, "strerror", None) or type(exc).__name__
+    return TokenFileError(
+        f"{path} could not be read: {reason}. Make it readable for the user this "
+        "program runs as, or give another path."
+    )
+
+
+def _ordinary(path: Path, status: os.stat_result) -> None:
+    """Refuse anything but an ordinary file, before it is opened and after."""
+    if stat.S_ISDIR(status.st_mode):
+        raise TokenFileError(
+            f"{path} is a directory. Give the path of the file that holds the token."
+        )
+    if not stat.S_ISREG(status.st_mode):
+        raise TokenFileError(
+            f"{path} is not an ordinary file — a pipe, a device or a socket. Give the "
+            "path of an ordinary file that holds the token."
+        )
+
+
 def token_from_file(given: str) -> tuple[str, str | None]:
     """The token held in a file, and a warning if others on this machine may use it.
 
@@ -248,8 +276,9 @@ def token_from_file(given: str) -> tuple[str, str | None]:
     fixed message, so a path cannot turn into a way to send a file's contents
     anywhere. Whitespace around the token is stripped, so a file written with a
     trailing newline works. The path has to be absolute, and the file an ordinary
-    one: it is opened once, checked on that descriptor and read no further than a
-    token file can be long. Whatever goes wrong, the message names the path, never
+    one: it is looked at before it is opened, checked again on the descriptor —
+    the same file, still ordinary — and read no further than a token file can be
+    long. Whatever goes wrong, the message names the path, never
     the contents.
     """
     if TOKEN_SHAPE.match(given.strip()):
@@ -272,32 +301,30 @@ def token_from_file(given: str) -> tuple[str, str | None]:
             "relative path would be taken from this program's working directory, which "
             "the harness chooses."
         )
+    try:
+        # Looked at before it is opened: opening a device can have effects of its own.
+        looked = os.stat(path)
+    except FileNotFoundError:
+        raise _no_file(path) from None
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _unreadable(path, exc) from None
+    _ordinary(path, looked)
     flags = os.O_RDONLY
     for name in ("O_NONBLOCK", "O_NOCTTY", "O_CLOEXEC"):
         flags |= getattr(os, name, 0)
     try:
         descriptor = os.open(path, flags)
     except FileNotFoundError:
-        raise TokenFileError(
-            f"there is no file at {path}. Write the token into a file there, alone, or "
-            "give the path of the file that holds it."
-        ) from None
+        raise _no_file(path) from None
     except (OSError, RuntimeError, ValueError) as exc:
-        reason = getattr(exc, "strerror", None) or type(exc).__name__
-        raise TokenFileError(
-            f"{path} could not be read: {reason}. Make it readable for the user this "
-            "program runs as, or give another path."
-        ) from None
+        raise _unreadable(path, exc) from None
     try:
         status = os.fstat(descriptor)
-        if stat.S_ISDIR(status.st_mode):
+        _ordinary(path, status)
+        if (status.st_dev, status.st_ino) != (looked.st_dev, looked.st_ino):
             raise TokenFileError(
-                f"{path} is a directory. Give the path of the file that holds the token."
-            )
-        if not stat.S_ISREG(status.st_mode):
-            raise TokenFileError(
-                f"{path} is not an ordinary file — a pipe, a device or a socket. Give the "
-                "path of an ordinary file that holds the token."
+                f"{path} was replaced while it was being read. Give the path again once "
+                "it holds the token."
             )
         raw = b""
         while len(raw) <= TOKEN_FILE_LIMIT:
@@ -306,11 +333,7 @@ def token_from_file(given: str) -> tuple[str, str | None]:
                 break
             raw += chunk
     except (OSError, RuntimeError, ValueError) as exc:
-        reason = getattr(exc, "strerror", None) or type(exc).__name__
-        raise TokenFileError(
-            f"{path} could not be read: {reason}. Make it readable for the user this "
-            "program runs as, or give another path."
-        ) from None
+        raise _unreadable(path, exc) from None
     finally:
         os.close(descriptor)
     if len(raw) > TOKEN_FILE_LIMIT:
@@ -618,8 +641,8 @@ class Service:
             # The text would name the character and where it stands: in a token,
             # that is part of the token.
             raise Unreachable(
-                "the request could not be sent: the token or a header holds a character "
-                "HTTP cannot carry"
+                "the request could not be sent: the token, a header or the address holds a "
+                "character HTTP cannot carry"
             ) from None
         except (urllib.error.URLError, OSError, ValueError) as failed:
             reason = getattr(failed, "reason", failed)
