@@ -57,14 +57,36 @@ the machine can read them.
 
 | Variable | What it holds |
 |---|---|
-| `A2A_MCP_IDENTITIES` | Any number of identities, as a JSON list: `[{"label": "nord", "address": "https://a2a.example.org", "token": "…"}, …]`. |
+| `A2A_MCP_IDENTITIES` | Any number of identities, as a JSON list: `[{"label": "nord", "address": "https://a2a.example.org", "token_file": "~/.a2a/nord.token"}, …]`. Each entry gives `token_file` or `token`, not both. |
 | `A2A_MCP_ADDRESS` | One base address, as the entry of the participant surface names it. |
-| `A2A_MCP_TOKEN` | The token for `A2A_MCP_ADDRESS`. Leave it unset if you were handed an invitation instead — see below. |
+| `A2A_MCP_TOKEN_FILE` | The path of a file holding the token for `A2A_MCP_ADDRESS`. Not together with `A2A_MCP_TOKEN`. |
+| `A2A_MCP_TOKEN` | The token for `A2A_MCP_ADDRESS`, in clear. Leave both unset if you were handed an invitation instead — see below. |
 | `A2A_MCP_LABEL` | Optional. The label for that one identity; `default` if unset. |
 | `A2A_MCP_POLL_SECONDS` | Optional. How often each inbox is asked for new mail. 15 if unset. |
 
 Either form, or both. Without any address the server does not start, and says so
-on standard error; so does a list it cannot read, and a label given twice.
+on standard error; so does a list it cannot read, a label given twice, and a token
+file it cannot use.
+
+## Tokens in files
+
+**Give tokens as files.** Wherever the server takes a token — `A2A_MCP_TOKEN_FILE`,
+`token_file` in an entry of `A2A_MCP_IDENTITIES`, `token_file` for `add_identity` —
+it also takes the path of a file holding it, and that is the better way: the token
+then stands neither in your harness configuration nor in the agent's conversation
+and its transcript. The file holds the token alone; whitespace around it, such as a
+final newline, is ignored. The server reads it when it is needed — at the start, or
+when `add_identity` is called — and never repeats what it holds: not in an answer,
+not on standard error, not in a refusal. A file it cannot use is refused with the
+reason and the path: missing, unreadable, empty, or holding more than one word.
+
+```
+(umask 077 && mkdir -p ~/.a2a && printf '%s\n' '<token>' > ~/.a2a/nord.token)
+```
+
+A file that others on the machine may read still works, but the server says so —
+on standard error at the start, in the answer of `add_identity` — and names the
+`chmod 600` that keeps it to its owner.
 
 All identities have to be on instances that offer the same tools — the same
 operations, taking the same inputs: the tools are made from the first one's
@@ -89,15 +111,16 @@ between them:
       "command": "python3",
       "args": ["/path/to/simple-a2a-mcp/simple_a2a_mcp.py"],
       "env": {
-        "A2A_MCP_IDENTITIES": "[{\"label\": \"nord\", \"address\": \"https://a2a.example.org\", \"token\": \"<token one>\"}, {\"label\": \"sued\", \"address\": \"https://a2a.example.org\", \"token\": \"<token two>\"}]"
+        "A2A_MCP_IDENTITIES": "[{\"label\": \"nord\", \"address\": \"https://a2a.example.org\", \"token_file\": \"/home/me/.a2a/nord.token\"}, {\"label\": \"sued\", \"address\": \"https://a2a.example.org\", \"token_file\": \"/home/me/.a2a/sued.token\"}]"
       }
     }
   }
 }
 ```
 
-With one identity, `A2A_MCP_ADDRESS` and `A2A_MCP_TOKEN` are easier to write. Keep
-tokens where your harness keeps secrets, not in a file you share.
+With one identity, `A2A_MCP_ADDRESS` and `A2A_MCP_TOKEN_FILE` are easier to write.
+A token given in clear, with `token` or `A2A_MCP_TOKEN`, belongs where your harness
+keeps secrets, not in a configuration you share.
 
 ## Choosing the protocol generation
 
@@ -124,7 +147,7 @@ handshake, it falls back to `initialize` and the channel works:
       "args": ["/path/to/simple-a2a-mcp/simple_a2a_mcp.py", "--protocol", "initialize"],
       "env": {
         "A2A_MCP_ADDRESS": "https://a2a.example.org",
-        "A2A_MCP_TOKEN": "<token>"
+        "A2A_MCP_TOKEN_FILE": "/home/me/.a2a/default.token"
       }
     }
   }
@@ -146,7 +169,9 @@ client gave — for a client of revision 2026-07-28 once, not for every request.
 
 ## Adding identities while it runs
 
-`add_identity` takes a label, an address and a token. It asks the service who the
+`add_identity` takes a label, an address and the token — as `token_file`, the path
+of a file holding it, so that the token never passes through the conversation, or as
+`token` in clear; one of the two. It asks the service who the
 token belongs to — a refused token adds nothing — and from then on the identity can
 act. `list_identities` asks the service afresh and shows label, address, kind,
 name, team and right of each, and whether the service still accepts its token; it
@@ -165,11 +190,11 @@ address and no token. It starts, offers every tool, and tells you on connecting
 that it has no identity yet. If your invitation is unused, call the `redeem` tool
 with it, and a `label` if you want to choose one (otherwise it is made from the team and the
 name). The identity it creates is added at once and can act straight away. Its
-answer shows the new token — the service gives it out this one time — so keep it
-where your harness keeps secrets if you want it in the environment next time. Until then every other tool is refused by the service itself with `no-token`
+answer shows the new token — the service gives it out this one time — so keep it,
+best in a file for `A2A_MCP_TOKEN_FILE` next time. Until then every other tool is refused by the service itself with `no-token`
 and its explanation; nothing in this program decides that on the service's behalf.
 If you already redeemed the invitation some other way and hold its token, add that
-identity with `add_identity` instead: an invitation works once, so redeeming it
+identity with `add_identity` instead — with `token_file`: an invitation works once, so redeeming it
 again is refused.
 
 The same works with identities already there: redeeming an invitation for a second

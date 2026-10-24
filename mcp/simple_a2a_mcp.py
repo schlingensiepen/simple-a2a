@@ -52,7 +52,10 @@ an inbox when its identity came in is not news and is not announced.
 **Tokens stay in memory.** This program writes none to disk. It does not hide them
 from the agent either: the agent set it up, so it handed over every token this
 program holds — or redeemed it, and the redeeming answer shows the new one so that
-it can be kept. Hiding a token from the one who gave it protects nothing.
+it can be kept. Hiding a token from the one who gave it protects nothing. What it
+does offer is a way around the conversation: wherever a token is taken, the path of
+a file holding it may be given instead. The file is read when it is needed, and its
+contents are never repeated — so a token handed over that way stands in no transcript.
 """
 
 from __future__ import annotations
@@ -84,6 +87,7 @@ VERSION = "0.1.0.dev0"
 #: and a client's settings in the same namespace would read like a ninth one.
 ADDRESS_VARIABLE = "A2A_MCP_ADDRESS"
 TOKEN_VARIABLE = "A2A_MCP_TOKEN"
+TOKEN_FILE_VARIABLE = "A2A_MCP_TOKEN_FILE"
 LABEL_VARIABLE = "A2A_MCP_LABEL"
 IDENTITIES_VARIABLE = "A2A_MCP_IDENTITIES"
 POLL_VARIABLE = "A2A_MCP_POLL_SECONDS"
@@ -210,6 +214,91 @@ def client_named(info: Any) -> str:
     return f"{said} {json.dumps(version, ensure_ascii=False)}" if version else said
 
 
+# ------------------------------------------------------------------ token files
+
+
+class TokenFileError(Exception):
+    """A token file that cannot be used, worded so the reader knows what to do.
+
+    The message names the path and never anything that is in the file.
+    """
+
+
+def token_from_file(given: str) -> tuple[str, str | None]:
+    """The token held in a file, and a warning if others on this machine may read it.
+
+    Whitespace around the token is stripped, so a file written with a trailing
+    newline works. Whatever goes wrong, the message names the path, never the
+    contents: a file meant for the token may hold something else by mistake.
+    """
+    path = Path(given).expanduser()
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        raise TokenFileError(
+            f"there is no file at {path}. Write the token into a file there, alone, or "
+            "give the path of the file that holds it."
+        ) from None
+    except IsADirectoryError:
+        raise TokenFileError(
+            f"{path} is a directory. Give the path of the file that holds the token."
+        ) from None
+    except OSError as exc:
+        raise TokenFileError(
+            f"{path} could not be read: {exc.strerror or type(exc).__name__}. Make it "
+            "readable for the user this program runs as, or give another path."
+        ) from None
+    try:
+        token = raw.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        raise TokenFileError(
+            f"{path} is not text. It has to hold the token alone, as text."
+        ) from None
+    if not token:
+        raise TokenFileError(f"{path} is empty. Write the token into it, alone, and try again.")
+    if len(token.split()) > 1:
+        raise TokenFileError(
+            f"{path} holds more than the token: whitespace within it. It has to hold the "
+            "token alone; nothing of it is repeated here."
+        )
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        mode = 0
+    if os.name != "posix" or not mode & 0o044:
+        return token, None
+    return token, (
+        f"{path} can be read by others on this machine (mode {mode & 0o777:o}); "
+        f"`chmod 600 {path}` keeps it to its owner."
+    )
+
+
+def _one_token(token: Any, token_file: Any) -> tuple[str, str | None]:
+    """Exactly one of a token and a token file, read to a token, and any warning.
+
+    The refusal is worded to follow the place it was given in and a colon.
+    """
+    token = token.strip() if isinstance(token, str) else token
+    token_file = token_file.strip() if isinstance(token_file, str) else token_file
+    if token and token_file:
+        raise TokenFileError(
+            "both `token` and `token_file` are given. Give one: `token_file`, the path of a "
+            "file holding the token, keeps the token itself out of sight."
+        )
+    if not token and not token_file:
+        raise TokenFileError(
+            "no token is given. Give `token_file`, the path of a file holding it, or "
+            "`token`, the token itself."
+        )
+    if token_file:
+        if not isinstance(token_file, str):
+            raise TokenFileError("`token_file` has to be a path, as a string.")
+        return token_from_file(token_file)
+    if not isinstance(token, str):
+        raise TokenFileError("`token` has to be a string.")
+    return token, None
+
+
 # ------------------------------------------------------------------ settings
 
 
@@ -239,6 +328,9 @@ class Settings:
     #: and every other is refused by the service itself, in its own words.
     bare_address: str | None
     poll_seconds: float
+    #: What a human should know about the start without it stopping it: a token file
+    #: others may read. Written to standard error.
+    notes: tuple[str, ...] = ()
 
     @classmethod
     def from_environment(cls, environment: dict[str, str] | os._Environ[str]) -> Settings:
@@ -246,12 +338,30 @@ class Settings:
 
         Two forms, usable together: one pair in `A2A_MCP_ADDRESS` and
         `A2A_MCP_TOKEN` (the token may be missing — then it is the address to
-        redeem at), and any number in `A2A_MCP_IDENTITIES`, a JSON list. Nothing in
-        a message here ever repeats a token.
+        redeem at), and any number in `A2A_MCP_IDENTITIES`, a JSON list. Wherever a
+        token is taken, the path of a file holding it may be given instead:
+        `A2A_MCP_TOKEN_FILE`, or `token_file` in an entry of the list. Nothing in a
+        message here ever repeats a token, or what a token file holds.
         """
         address = (environment.get(ADDRESS_VARIABLE) or "").strip()
         token = (environment.get(TOKEN_VARIABLE) or "").strip() or None
+        token_file = (environment.get(TOKEN_FILE_VARIABLE) or "").strip() or None
         listed = (environment.get(IDENTITIES_VARIABLE) or "").strip()
+        notes: list[str] = []
+        if token and token_file:
+            raise StartRefused(
+                f"both {TOKEN_VARIABLE} and {TOKEN_FILE_VARIABLE} are set. Set one: "
+                f"{TOKEN_FILE_VARIABLE}, the path of a file holding the token, keeps the "
+                "token itself out of the configuration.",
+                2,
+            )
+        if token_file:
+            try:
+                token, warning = token_from_file(token_file)
+            except TokenFileError as failed:
+                raise StartRefused(f"{TOKEN_FILE_VARIABLE}: {failed}", 2) from None
+            if warning:
+                notes.append(f"{TOKEN_FILE_VARIABLE}: {warning}")
         if not address and not listed:
             raise StartRefused(
                 f"neither {ADDRESS_VARIABLE} nor {IDENTITIES_VARIABLE} is set. Start this "
@@ -263,7 +373,8 @@ class Settings:
             )
         if token and not address:
             raise StartRefused(
-                f"{TOKEN_VARIABLE} is set but {ADDRESS_VARIABLE} is not: a token belongs to "
+                f"{TOKEN_FILE_VARIABLE if token_file else TOKEN_VARIABLE} is set but "
+                f"{ADDRESS_VARIABLE} is not: a token belongs to "
                 "the address that issued it, and is worthless without it.",
                 2,
             )
@@ -279,7 +390,7 @@ class Settings:
             else:
                 bare = where
         if listed:
-            entries += _listed(listed)
+            entries += _listed(listed, notes)
         seen: set[str] = set()
         for entry in entries:
             if entry.label.lower() in seen:
@@ -300,7 +411,7 @@ class Settings:
                 f"{POLL_DEFAULT:g}.",
                 2,
             )
-        return cls(entries=tuple(entries), bare_address=bare, poll_seconds=poll)
+        return cls(entries=tuple(entries), bare_address=bare, poll_seconds=poll, notes=tuple(notes))
 
 
 def _address(value: str, where: str) -> str:
@@ -313,14 +424,18 @@ def _address(value: str, where: str) -> str:
     return value.rstrip("/")
 
 
-def _listed(raw: str) -> list[Entry]:
-    """`A2A_MCP_IDENTITIES`: a JSON list of objects with label, address and token."""
+def _listed(raw: str, notes: list[str]) -> list[Entry]:
+    """`A2A_MCP_IDENTITIES`: a JSON list of objects with label, address and token.
+
+    Instead of the token, an entry may give `token_file`, the path of a file holding
+    it — one of the two, never both. A warning about such a file goes to `notes`.
+    """
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise StartRefused(
             f"{IDENTITIES_VARIABLE} is not JSON ({exc.msg}, at character {exc.pos}). It is "
-            'a list like [{"label": "nord", "address": "https://…", "token": "…"}].',
+            'a list like [{"label": "nord", "address": "https://…", "token_file": "…"}].',
             2,
         ) from None
     if not isinstance(parsed, list) or not parsed:
@@ -332,18 +447,25 @@ def _listed(raw: str) -> list[Entry]:
             raise StartRefused(f"{where} is not an object.", 2)
         missing = [
             key
-            for key in ("label", "address", "token")
+            for key in ("label", "address")
             if not isinstance(item.get(key), str) or not item[key].strip()
         ]
         if missing:
             raise StartRefused(f"{where} has no {', '.join(missing)}.", 2)
-        unknown = sorted(set(item) - {"label", "address", "token"})
+        unknown = sorted(set(item) - {"label", "address", "token", "token_file"})
         if unknown:
             raise StartRefused(f"{where} has fields this program does not know: {unknown}.", 2)
         label = item["label"].strip()
         if not LABEL.fullmatch(label):
             raise StartRefused(f"{where}: {LABEL_RULE}", 2)
-        found.append(Entry(label, _address(item["address"].strip(), where), item["token"].strip()))
+        address = _address(item["address"].strip(), where)
+        try:
+            token, warning = _one_token(item.get("token"), item.get("token_file"))
+        except TokenFileError as failed:
+            raise StartRefused(f"{where}: {failed}", 2) from None
+        if warning:
+            notes.append(f"{where}: {warning}")
+        found.append(Entry(label, address, token))
     return found
 
 
@@ -957,7 +1079,10 @@ OWN_TOOLS: dict[str, dict[str, Any]] = {
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     "add_identity": {
-        "description": "Add an identity from a label, an address and a token. The token is "
+        "description": "Add an identity from a label, an address and a token. Give the token "
+        "as `token_file`, the path of a file on this machine that holds it: the file is read "
+        "now and its contents are never repeated, so the token stays out of this "
+        "conversation. `token`, the token itself, works too — one of the two. The token is "
         "checked by asking the service who it belongs to; a refused token adds nothing. The "
         "address must offer the same operations, with the same inputs, as the instance these "
         "tools were made from. Added identities live only in this process: nothing is "
@@ -971,12 +1096,19 @@ OWN_TOOLS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "description": "The base address of the participant surface.",
                 },
+                "token_file": {
+                    "type": "string",
+                    "description": "The path of a file on this machine holding the token of "
+                    "that identity, alone; whitespace around it is ignored. Preferred over "
+                    "`token`. Not together with `token`.",
+                },
                 "token": {
                     "type": "string",
-                    "description": "The token of that identity.",
+                    "description": "The token of that identity, in clear — it then stands in "
+                    "this conversation. Not together with `token_file`.",
                 },
             },
-            "required": ["label", "address", "token"],
+            "required": ["label", "address"],
             "additionalProperties": False,
         },
     },
@@ -1776,8 +1908,9 @@ class Server:
                 f"The identity it creates is added to this server at once, and its token is in "
                 f"that one answer — shown once, because that is the one moment it exists, so "
                 f"keep it where you keep secrets. If you already hold a token — because you "
-                f"redeemed the invitation some other way — call `add_identity` with it instead: "
-                f"an invitation works once, so redeeming it again is refused. Until then every "
+                f"redeemed the invitation some other way — call `add_identity` with it instead, "
+                f"best as `token_file`, the path of a file holding it: an invitation works "
+                f"once, so redeeming it again is refused. Until then every "
                 f"other tool is refused by the service with `no-token`."
             )
         else:
@@ -1822,8 +1955,10 @@ class Server:
             f"them; you can.\n\n"
             f"{who} Every result names, in its first line, the identity that acted.\n\n"
             f"Identities come from the environment at start — {IDENTITIES_VARIABLE} as a "
-            f"JSON list of label, address and token, or one pair in {ADDRESS_VARIABLE} and "
-            f"{TOKEN_VARIABLE} — or at runtime: `add_identity` adds one, `list_identities` "
+            f"JSON list of label, address and token or token_file, or one pair in "
+            f"{ADDRESS_VARIABLE} and {TOKEN_VARIABLE} or {TOKEN_FILE_VARIABLE} — or at runtime: `add_identity` adds one (give it "
+            f"`token_file`, the path of a file holding the token, and the token stays out of "
+            f"this conversation), `list_identities` "
             f"shows them without their tokens, `remove_identity` forgets one, and "
             f"`{self.redeem}` adds the identity it creates. What is added at runtime lives "
             f"only in this process: this server keeps tokens in memory and writes none to "
@@ -2017,13 +2152,22 @@ class Server:
         return _text_result(json.dumps(listed, ensure_ascii=False, indent=2))
 
     def add_identity(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        label, address, token = (arguments.get(k) for k in ("label", "address", "token"))
-        unknown = sorted(set(arguments) - {"label", "address", "token"})
+        label, address = arguments.get("label"), arguments.get("address")
+        unknown = sorted(set(arguments) - {"label", "address", "token", "token_file"})
         if unknown:
             return _text_result(f"add_identity does not take {', '.join(unknown)}.", error=True)
-        if not all(isinstance(value, str) and value.strip() for value in (label, address, token)):
-            return _text_result("add_identity needs `label`, `address` and `token`.", error=True)
-        label, address, token = label.strip(), address.strip().rstrip("/"), token.strip()
+        if not all(isinstance(value, str) and value.strip() for value in (label, address)):
+            return _text_result(
+                "add_identity needs `label`, `address`, and the token: `token_file`, the path "
+                "of a file holding it, or `token`.",
+                error=True,
+            )
+        label, address = label.strip(), address.strip().rstrip("/")
+        try:
+            # Read now, at the call: a file written a moment ago counts.
+            token, warning = _one_token(arguments.get("token"), arguments.get("token_file"))
+        except TokenFileError as failed:
+            return _text_result(f"Nothing was added: {failed}", error=True)
         if not LABEL.fullmatch(label):
             return _text_result(f"`label`: {LABEL_RULE}.", error=True)
         if self.find(label) is not None:
@@ -2057,6 +2201,7 @@ class Server:
         return _text_result(
             f"identity: {label} — added: {identity.described()}. It lives only in this "
             f"process; nothing was written to disk.{rule}"
+            + (f"\n\nNote: {warning}" if warning else "")
         )
 
     def remove_identity(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -2350,6 +2495,8 @@ def start(
 ) -> Server:
     """Everything that has to hold before the first message is read."""
     settings = Settings.from_environment(environment)
+    for note in settings.notes:
+        log(note)
     first = settings.bare_address or settings.entries[0].address
     try:
         document = Service(first, None).description()

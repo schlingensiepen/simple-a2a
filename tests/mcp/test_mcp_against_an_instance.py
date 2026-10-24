@@ -1453,7 +1453,7 @@ def test_the_handshake_explains_the_identities(instance: Instance, programs: Any
     ("listed", "told"),
     [
         ("not json", "is not JSON"),
-        ('[{"label": "a", "address": "http://x"}]', "has no token"),
+        ('[{"label": "a", "address": "http://x"}]', "entry 1: no token is given"),
         (
             json.dumps(
                 [
@@ -1996,3 +1996,192 @@ def test_the_instructions_say_honestly_how_new_mail_reaches_an_agent(
     assert "cannot know whether you see them" in flat
     for promise in ("you will be notified", "you are notified", "will wake you"):
         assert promise not in flat.lower(), promise
+
+
+# ------------------------------------------------------------------ tokens in files
+
+
+def token_file(directory: Path, name: str, content: str, mode: int = 0o600) -> Path:
+    """A file holding `content`, readable as `mode` says."""
+    path = directory / name
+    path.write_text(content, encoding="utf-8")
+    path.chmod(mode)
+    return path
+
+
+def test_an_identity_added_from_a_token_file_works_and_the_token_is_never_shown(
+    instance: Instance, programs: Any, tmp_path: Path
+) -> None:
+    """Read at the call, whitespace stripped; the token stands in no answer, no log line."""
+    one = programs(instance.anna, A2A_MCP_LABEL="nord")
+    one.initialize()
+    held = token_file(tmp_path, "berta.token", f"\n  {instance.berta}\n")
+
+    added = one.call("add_identity", label="west", address=instance.base, token_file=str(held))
+    me = one.call("me", identity="west")
+    listed = one.call("list_identities")
+    stdout, stderr = one.close()
+
+    assert added["isError"] is False, text_of(added)
+    assert "Berta" in text_of(added) and "Note:" not in text_of(added)
+    assert me["isError"] is False and "Berta" in text_of(me)
+    assert "west" in text_of(listed)
+    assert instance.berta not in json.dumps(added) and instance.berta not in json.dumps(listed)
+    assert instance.berta not in stderr
+    tools = json.loads(stdout.splitlines()[0])  # the handshake, not a token
+    assert instance.berta not in json.dumps(tools)
+
+
+def test_a_token_file_others_can_read_works_with_a_warning(
+    instance: Instance, programs: Any, tmp_path: Path
+) -> None:
+    one = programs(instance.anna, A2A_MCP_LABEL="nord")
+    one.initialize()
+    held = token_file(tmp_path, "open.token", instance.berta, mode=0o644)
+
+    added = one.call("add_identity", label="west", address=instance.base, token_file=str(held))
+
+    assert added["isError"] is False, text_of(added)
+    said = text_of(added)
+    assert "Note:" in said and "can be read by others" in said and "chmod 600" in said
+    assert instance.berta not in said
+
+
+@pytest.mark.parametrize(
+    ("given", "told"),
+    [
+        ("both", "both `token` and `token_file` are given"),
+        ("neither", "no token is given. Give `token_file`"),
+        ("missing", "there is no file at"),
+        ("empty", "is empty. Write the token into it"),
+        ("two words", "holds more than the token"),
+        ("directory", "is a directory"),
+    ],
+)
+def test_a_token_file_that_cannot_be_used_is_refused_with_what_to_do(
+    instance: Instance, programs: Any, tmp_path: Path, given: str, told: str
+) -> None:
+    one = programs(instance.anna, A2A_MCP_LABEL="nord")
+    one.initialize()
+    secret = instance.berta
+    arguments: dict[str, str] = {"label": "west", "address": instance.base}
+    if given == "both":
+        arguments["token"] = secret
+        arguments["token_file"] = str(token_file(tmp_path, "t", secret))
+    elif given == "missing":
+        arguments["token_file"] = str(tmp_path / "not-there.token")
+    elif given == "empty":
+        arguments["token_file"] = str(token_file(tmp_path, "t", " \n"))
+    elif given == "two words":
+        arguments["token_file"] = str(token_file(tmp_path, "t", f"{secret} {secret}\n"))
+    elif given == "directory":
+        arguments["token_file"] = str(tmp_path)
+
+    refused = one.call("add_identity", **arguments)
+    listed = json.loads(text_of(one.call("list_identities")))
+    _, stderr = one.close()
+
+    assert refused["isError"] is True
+    said = text_of(refused)
+    assert told in said and "Nothing was added" in said
+    assert secret not in said and secret not in stderr
+    assert [i["label"] for i in listed] == ["nord"]
+
+
+def test_the_schema_offers_the_token_file_and_requires_neither(
+    instance: Instance, programs: Any
+) -> None:
+    one = programs(instance.anna)
+    one.initialize()
+
+    tools = one.ask("tools/list")["result"]["tools"]
+    adding = next(tool for tool in tools if tool["name"] == "add_identity")
+
+    assert {"token", "token_file"} <= set(adding["inputSchema"]["properties"])
+    assert adding["inputSchema"]["required"] == ["label", "address"]
+    assert "`token_file`" in adding["description"]
+
+
+def test_at_the_start_a_token_file_works_in_either_form(
+    instance: Instance, programs: Any, tmp_path: Path
+) -> None:
+    anna = token_file(tmp_path, "anna.token", instance.anna + "\n")
+    gustav = token_file(tmp_path, "gustav.token", instance.gustav, mode=0o640)
+    single = programs(None, A2A_MCP_TOKEN_FILE=str(anna))
+    listed = programs(
+        None,
+        [
+            {"label": "nord", "address": instance.base, "token_file": str(anna)},
+            {"label": "sued", "address": instance.base, "token_file": str(gustav)},
+        ],
+    )
+    single.initialize()
+    listed.initialize()
+
+    alone = single.call("me")
+    sued = listed.call("me", identity="sued")
+    _, single_log = single.close()
+    _, listed_log = listed.close()
+
+    assert alone["isError"] is False and "Anna" in text_of(alone)
+    assert sued["isError"] is False and "Gustav" in text_of(sued)
+    assert "can be read by others" in listed_log and "entry 2" in listed_log
+    assert "can be read by others" not in single_log
+    for secret in (instance.anna, instance.gustav):
+        assert secret not in single_log and secret not in listed_log
+
+
+@pytest.mark.parametrize(
+    ("environment", "told"),
+    [
+        (
+            {"A2A_MCP_TOKEN": "t" * 43, "A2A_MCP_TOKEN_FILE": "{held}"},
+            "both A2A_MCP_TOKEN and A2A_MCP_TOKEN_FILE are set",
+        ),
+        ({"A2A_MCP_TOKEN_FILE": "{missing}"}, "A2A_MCP_TOKEN_FILE: there is no file at"),
+        ({"A2A_MCP_TOKEN_FILE": "{empty}"}, "A2A_MCP_TOKEN_FILE: {empty} is empty"),
+        (
+            {
+                "A2A_MCP_IDENTITIES": '[{"label": "a", "address": "http://x", "token": "'
+                + "t" * 43
+                + '", "token_file": "{held}"}]'
+            },
+            "entry 1: both `token` and `token_file` are given",
+        ),
+        (
+            {
+                "A2A_MCP_IDENTITIES": '[{"label": "a", "address": "http://x", "token_file": "{empty}"}]'
+            },
+            "entry 1: {empty} is empty",
+        ),
+    ],
+)
+def test_a_token_file_that_cannot_be_used_stops_the_start(
+    tmp_path: Path, environment: dict[str, str], told: str
+) -> None:
+    held = token_file(tmp_path, "held.token", "h" * 43)
+    empty = token_file(tmp_path, "empty.token", "")
+    where = {"held": str(held), "missing": str(tmp_path / "missing"), "empty": str(empty)}
+
+    def placed(text: str) -> str:
+        for name, path in where.items():
+            text = text.replace("{" + name + "}", path)
+        return text
+
+    started = subprocess.run(
+        [sys.executable, str(PROGRAM)],
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "A2A_MCP_ADDRESS": "http://127.0.0.1:9",
+            **{key: placed(value) for key, value in environment.items()},
+        },
+        input=b"",
+        capture_output=True,
+        timeout=PATIENCE,
+        check=False,
+    )
+
+    assert started.returncode == 2
+    said = started.stderr.decode()
+    assert placed(told) in said
+    assert "h" * 43 not in said and "t" * 43 not in said
