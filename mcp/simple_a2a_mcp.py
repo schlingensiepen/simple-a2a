@@ -65,6 +65,7 @@ import json
 import mimetypes
 import os
 import re
+import stat
 import sys
 import threading
 import time
@@ -224,52 +225,114 @@ class TokenFileError(Exception):
     """
 
 
-def token_from_file(given: str) -> tuple[str, str | None]:
-    """The token held in a file, and a warning if others on this machine may read it.
+#: The shape of a participant token of this service: 43 characters of base64url,
+#: what 32 random bytes come to. A file is taken only if it holds exactly that.
+TOKEN_SHAPE = re.compile(r"\A[A-Za-z0-9_-]{43}\Z")
 
-    Whitespace around the token is stripped, so a file written with a trailing
-    newline works. Whatever goes wrong, the message names the path, never the
-    contents: a file meant for the token may hold something else by mistake.
+#: More than any token file needs; a longer file is not read to its end.
+TOKEN_FILE_LIMIT = 4096
+
+
+def _not_a_token(path: Path) -> TokenFileError:
+    return TokenFileError(
+        f"{path} does not hold a token of this service: a token is 43 characters of "
+        "letters, digits, `-` and `_`, alone in the file. Nothing of it is repeated here."
+    )
+
+
+def token_from_file(given: str) -> tuple[str, str | None]:
+    """The token held in a file, and a warning if others on this machine may use it.
+
+    Only a token of this service's shape is taken: whatever else a file holds — a
+    secret of another service, a line of some configuration — is refused with one
+    fixed message, so a path cannot turn into a way to send a file's contents
+    anywhere. Whitespace around the token is stripped, so a file written with a
+    trailing newline works. The path has to be absolute, and the file an ordinary
+    one: it is opened once, checked on that descriptor and read no further than a
+    token file can be long. Whatever goes wrong, the message names the path, never
+    the contents.
     """
-    path = Path(given).expanduser()
+    if TOKEN_SHAPE.match(given.strip()):
+        raise TokenFileError(
+            "the path given looks like a token, not a path. Write the token into a file "
+            "and give the path of that file; nothing of what was given is repeated here."
+        )
+    if "\0" in given:
+        raise TokenFileError("the path given holds a NUL character, which no path can hold.")
     try:
-        raw = path.read_bytes()
+        path = Path(given).expanduser()
+    except (RuntimeError, ValueError, OSError):
+        raise TokenFileError(
+            f"{given} starts with a `~` this machine cannot resolve: there is no such user "
+            "or no home directory. Give an absolute path."
+        ) from None
+    if not path.is_absolute():
+        raise TokenFileError(
+            f"{path} is a relative path. Give an absolute one (a leading `~` is fine): a "
+            "relative path would be taken from this program's working directory, which "
+            "the harness chooses."
+        )
+    flags = os.O_RDONLY
+    for name in ("O_NONBLOCK", "O_NOCTTY", "O_CLOEXEC"):
+        flags |= getattr(os, name, 0)
+    try:
+        descriptor = os.open(path, flags)
     except FileNotFoundError:
         raise TokenFileError(
             f"there is no file at {path}. Write the token into a file there, alone, or "
             "give the path of the file that holds it."
         ) from None
-    except IsADirectoryError:
+    except (OSError, RuntimeError, ValueError) as exc:
+        reason = getattr(exc, "strerror", None) or type(exc).__name__
         raise TokenFileError(
-            f"{path} is a directory. Give the path of the file that holds the token."
-        ) from None
-    except OSError as exc:
-        raise TokenFileError(
-            f"{path} could not be read: {exc.strerror or type(exc).__name__}. Make it "
-            "readable for the user this program runs as, or give another path."
+            f"{path} could not be read: {reason}. Make it readable for the user this "
+            "program runs as, or give another path."
         ) from None
     try:
-        token = raw.decode("utf-8").strip()
-    except UnicodeDecodeError:
+        status = os.fstat(descriptor)
+        if stat.S_ISDIR(status.st_mode):
+            raise TokenFileError(
+                f"{path} is a directory. Give the path of the file that holds the token."
+            )
+        if not stat.S_ISREG(status.st_mode):
+            raise TokenFileError(
+                f"{path} is not an ordinary file — a pipe, a device or a socket. Give the "
+                "path of an ordinary file that holds the token."
+            )
+        raw = b""
+        while len(raw) <= TOKEN_FILE_LIMIT:
+            chunk = os.read(descriptor, TOKEN_FILE_LIMIT + 1 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
+    except (OSError, RuntimeError, ValueError) as exc:
+        reason = getattr(exc, "strerror", None) or type(exc).__name__
         raise TokenFileError(
-            f"{path} is not text. It has to hold the token alone, as text."
+            f"{path} could not be read: {reason}. Make it readable for the user this "
+            "program runs as, or give another path."
         ) from None
+    finally:
+        os.close(descriptor)
+    if len(raw) > TOKEN_FILE_LIMIT:
+        raise _not_a_token(path)
+    try:
+        token = raw.decode("ascii").strip()
+    except UnicodeDecodeError:
+        raise _not_a_token(path) from None
     if not token:
         raise TokenFileError(f"{path} is empty. Write the token into it, alone, and try again.")
-    if len(token.split()) > 1:
-        raise TokenFileError(
-            f"{path} holds more than the token: whitespace within it. It has to hold the "
-            "token alone; nothing of it is repeated here."
-        )
-    try:
-        mode = path.stat().st_mode
-    except OSError:
-        mode = 0
-    if os.name != "posix" or not mode & 0o044:
+    if not TOKEN_SHAPE.match(token):
+        raise _not_a_token(path)
+    mode = status.st_mode
+    if os.name != "posix" or not mode & 0o066:
         return token, None
+    others = " and ".join(
+        word for bits, word in ((0o044, "read"), (0o022, "changed")) if mode & bits
+    )
+    changed = ", who could put another token in it" if mode & 0o022 else ""
     return token, (
-        f"{path} can be read by others on this machine (mode {mode & 0o777:o}); "
-        f"`chmod 600 {path}` keeps it to its owner."
+        f"{path} can be {others} by others on this machine{changed} (mode "
+        f"{mode & 0o777:o}); `chmod 600 {path}` keeps it to its owner."
     )
 
 
@@ -316,7 +379,8 @@ class Entry:
 
     label: str
     address: str
-    token: str
+    #: Never in a representation: nothing that prints one of these prints a token.
+    token: str = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -550,6 +614,13 @@ class Service:
         except urllib.error.HTTPError as refused:
             with refused:
                 return Answer(refused.code, refused.headers.get("Content-Type", ""), refused.read())
+        except UnicodeEncodeError:
+            # The text would name the character and where it stands: in a token,
+            # that is part of the token.
+            raise Unreachable(
+                "the request could not be sent: the token or a header holds a character "
+                "HTTP cannot carry"
+            ) from None
         except (urllib.error.URLError, OSError, ValueError) as failed:
             reason = getattr(failed, "reason", failed)
             raise Unreachable(str(reason)) from None
@@ -935,7 +1006,8 @@ class Identity:
 
     label: str
     address: str
-    token: str
+    #: Never in a representation: nothing that prints one of these prints a token.
+    token: str = field(repr=False)
     kind: str | None = None
     name: str | None = None
     team: str | None = None
@@ -1082,7 +1154,9 @@ OWN_TOOLS: dict[str, dict[str, Any]] = {
         "description": "Add an identity from a label, an address and a token. Give the token "
         "as `token_file`, the path of a file on this machine that holds it: the file is read "
         "now and its contents are never repeated, so the token stays out of this "
-        "conversation. `token`, the token itself, works too — one of the two. The token is "
+        "conversation. A token read from a file is sent to the address given, so give a file "
+        "only for an address you trust. `token`, the token itself, works too — one of the "
+        "two. The token is "
         "checked by asking the service who it belongs to; a refused token adds nothing. The "
         "address must offer the same operations, with the same inputs, as the instance these "
         "tools were made from. Added identities live only in this process: nothing is "
@@ -1098,8 +1172,8 @@ OWN_TOOLS: dict[str, dict[str, Any]] = {
                 },
                 "token_file": {
                     "type": "string",
-                    "description": "The path of a file on this machine holding the token of "
-                    "that identity, alone; whitespace around it is ignored. Preferred over "
+                    "description": "The absolute path of a file on this machine holding the "
+                    "token of that identity, alone; whitespace around it is ignored. Preferred over "
                     "`token`. Not together with `token`.",
                 },
                 "token": {

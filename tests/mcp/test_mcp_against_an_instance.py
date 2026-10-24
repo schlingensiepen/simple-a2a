@@ -2032,6 +2032,22 @@ def test_an_identity_added_from_a_token_file_works_and_the_token_is_never_shown(
     assert instance.berta not in json.dumps(tools)
 
 
+def test_a_token_file_others_can_change_works_with_a_warning(
+    instance: Instance, programs: Any, tmp_path: Path
+) -> None:
+    one = programs(instance.anna, A2A_MCP_LABEL="nord")
+    one.initialize()
+    held = token_file(tmp_path, "shared.token", instance.berta, mode=0o620)
+
+    added = one.call("add_identity", label="west", address=instance.base, token_file=str(held))
+
+    assert added["isError"] is False, text_of(added)
+    said = text_of(added)
+    assert "can be changed by others" in said and "another token" in said
+    assert "can be read" not in said and "chmod 600" in said
+    assert instance.berta not in said
+
+
 def test_a_token_file_others_can_read_works_with_a_warning(
     instance: Instance, programs: Any, tmp_path: Path
 ) -> None:
@@ -2054,8 +2070,17 @@ def test_a_token_file_others_can_read_works_with_a_warning(
         ("neither", "no token is given. Give `token_file`"),
         ("missing", "there is no file at"),
         ("empty", "is empty. Write the token into it"),
-        ("two words", "holds more than the token"),
+        ("two words", "does not hold a token of this service"),
+        ("not a token", "does not hold a token of this service"),
+        ("not text", "does not hold a token of this service"),
+        ("oversized", "does not hold a token of this service"),
         ("directory", "is a directory"),
+        ("fifo", "is not an ordinary file"),
+        ("device", "is not an ordinary file"),
+        ("relative", "is a relative path. Give an absolute one"),
+        ("unknown user", "starts with a `~` this machine cannot resolve"),
+        ("nul byte", "holds a NUL character"),
+        ("token as path", "looks like a token, not a path"),
     ],
 )
 def test_a_token_file_that_cannot_be_used_is_refused_with_what_to_do(
@@ -2074,8 +2099,34 @@ def test_a_token_file_that_cannot_be_used_is_refused_with_what_to_do(
         arguments["token_file"] = str(token_file(tmp_path, "t", " \n"))
     elif given == "two words":
         arguments["token_file"] = str(token_file(tmp_path, "t", f"{secret} {secret}\n"))
+    elif given == "not a token":
+        # A one-line secret of something else: shaped like no token of this service.
+        arguments["token_file"] = str(token_file(tmp_path, "t", f"key-{secret}\n"))
+    elif given == "not text":
+        held = tmp_path / "t"
+        held.write_bytes(b"\xff" * 43)
+        arguments["token_file"] = str(held)
+    elif given == "oversized":
+        arguments["token_file"] = str(token_file(tmp_path, "t", secret + " " * 5000))
     elif given == "directory":
         arguments["token_file"] = str(tmp_path)
+    elif given == "fifo":
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("no named pipes here")
+        os.mkfifo(tmp_path / "pipe")
+        arguments["token_file"] = str(tmp_path / "pipe")
+    elif given == "device":
+        if not Path("/dev/null").exists():
+            pytest.skip("no /dev/null here")
+        arguments["token_file"] = "/dev/null"
+    elif given == "relative":
+        arguments["token_file"] = "a2a.token"
+    elif given == "unknown user":
+        arguments["token_file"] = "~no-such-user-a2a-test/a2a.token"
+    elif given == "nul byte":
+        arguments["token_file"] = str(tmp_path / "a\0b")
+    elif given == "token as path":
+        arguments["token_file"] = secret
 
     refused = one.call("add_identity", **arguments)
     listed = json.loads(text_of(one.call("list_identities")))
@@ -2140,6 +2191,13 @@ def test_at_the_start_a_token_file_works_in_either_form(
         ),
         ({"A2A_MCP_TOKEN_FILE": "{missing}"}, "A2A_MCP_TOKEN_FILE: there is no file at"),
         ({"A2A_MCP_TOKEN_FILE": "{empty}"}, "A2A_MCP_TOKEN_FILE: {empty} is empty"),
+        ({"A2A_MCP_TOKEN_FILE": "t" * 43}, "A2A_MCP_TOKEN_FILE: the path given looks like a token"),
+        ({"A2A_MCP_TOKEN_FILE": "a2a.token"}, "A2A_MCP_TOKEN_FILE: a2a.token is a relative path"),
+        (
+            {"A2A_MCP_TOKEN_FILE": "~no-such-user-a2a-test/t"},
+            "A2A_MCP_TOKEN_FILE: ~no-such-user-a2a-test/t starts with a `~`",
+        ),
+        ({"A2A_MCP_TOKEN_FILE": "{wrong}"}, "A2A_MCP_TOKEN_FILE: {wrong} does not hold a token"),
         (
             {
                 "A2A_MCP_IDENTITIES": '[{"label": "a", "address": "http://x", "token": "'
@@ -2161,7 +2219,13 @@ def test_a_token_file_that_cannot_be_used_stops_the_start(
 ) -> None:
     held = token_file(tmp_path, "held.token", "h" * 43)
     empty = token_file(tmp_path, "empty.token", "")
-    where = {"held": str(held), "missing": str(tmp_path / "missing"), "empty": str(empty)}
+    wrong = token_file(tmp_path, "wrong.token", "w" * 42 + "\n")
+    where = {
+        "held": str(held),
+        "missing": str(tmp_path / "missing"),
+        "empty": str(empty),
+        "wrong": str(wrong),
+    }
 
     def placed(text: str) -> str:
         for name, path in where.items():
@@ -2184,4 +2248,22 @@ def test_a_token_file_that_cannot_be_used_stops_the_start(
     assert started.returncode == 2
     said = started.stderr.decode()
     assert placed(told) in said
-    assert "h" * 43 not in said and "t" * 43 not in said
+    assert "h" * 43 not in said and "t" * 43 not in said and "w" * 42 not in said
+
+
+def test_a_token_http_cannot_carry_is_refused_without_naming_it(
+    instance: Instance, programs: Any
+) -> None:
+    """The encoder's own text would name the character and its place in the token."""
+    one = programs(instance.anna, A2A_MCP_LABEL="nord")
+    one.initialize()
+    secret = "q" * 30 + "€" + "z" * 12
+
+    refused = one.call("add_identity", label="west", address=instance.base, token=secret)
+    _, stderr = one.close()
+
+    said = text_of(refused)
+    assert refused["isError"] is True and "Nothing was added" in said
+    assert "cannot carry" in said
+    for part in ("€", "\\u20ac", "position", secret):
+        assert part not in said and part not in stderr

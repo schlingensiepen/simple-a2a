@@ -59,7 +59,7 @@ the machine can read them.
 |---|---|
 | `A2A_MCP_IDENTITIES` | Any number of identities, as a JSON list: `[{"label": "nord", "address": "https://a2a.example.org", "token_file": "~/.a2a/nord.token"}, …]`. Each entry gives `token_file` or `token`, not both. |
 | `A2A_MCP_ADDRESS` | One base address, as the entry of the participant surface names it. |
-| `A2A_MCP_TOKEN_FILE` | The path of a file holding the token for `A2A_MCP_ADDRESS`. Not together with `A2A_MCP_TOKEN`. |
+| `A2A_MCP_TOKEN_FILE` | The absolute path of a file holding the token for `A2A_MCP_ADDRESS`. Not together with `A2A_MCP_TOKEN`. |
 | `A2A_MCP_TOKEN` | The token for `A2A_MCP_ADDRESS`, in clear. Leave both unset if you were handed an invitation instead — see below. |
 | `A2A_MCP_LABEL` | Optional. The label for that one identity; `default` if unset. |
 | `A2A_MCP_POLL_SECONDS` | Optional. How often each inbox is asked for new mail. 15 if unset. |
@@ -77,8 +77,14 @@ then stands neither in your harness configuration nor in the agent's conversatio
 and its transcript. The file holds the token alone; whitespace around it, such as a
 final newline, is ignored. The server reads it when it is needed — at the start, or
 when `add_identity` is called — and never repeats what it holds: not in an answer,
-not on standard error, not in a refusal. A file it cannot use is refused with the
-reason and the path: missing, unreadable, empty, or holding more than one word.
+not on standard error, not in a refusal. The path has to be absolute (a leading
+`~` is fine): a relative one would depend on the working directory the harness
+starts the server in. Only an ordinary file is read, and only a few KiB of it; a
+file it cannot use is refused with the reason and the path: missing, unreadable,
+empty, a pipe or a device, or not holding a token of this service — 43 characters
+of letters, digits, `-` and `_`. What else such a file holds is not repeated. A
+token read from a file is sent to the address given, so give a file only for an
+address you trust.
 
 ```
 (umask 077 && mkdir -p ~/.a2a && printf '%s\n' '<token>' > ~/.a2a/nord.token)
@@ -86,7 +92,7 @@ reason and the path: missing, unreadable, empty, or holding more than one word.
 
 A file that others on the machine may read still works, but the server says so —
 on standard error at the start, in the answer of `add_identity` — and names the
-`chmod 600` that keeps it to its owner.
+`chmod 600` that keeps it to its owner. The same goes for a file others may change.
 
 All identities have to be on instances that offer the same tools — the same
 operations, taking the same inputs: the tools are made from the first one's
