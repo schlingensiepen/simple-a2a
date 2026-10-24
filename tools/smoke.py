@@ -19,9 +19,10 @@ Two ways to start, one sequence of checks:
         XDG_STATE_HOME there — not a parameter of the service, so the start stays
         bare.
 
-    smoke.py container --image IMAGE [--name NAME] [--volume VOLUME]
+    smoke.py container --image IMAGE [--name NAME] [--volume VOLUME --keep-volume]
         runs the image with nothing set, only its three ports published on the
-        loopback address and a named volume on the data directory, waits for the
+        loopback address and a volume of the run's own on the data directory
+        (removed afterwards, passed or failed), waits for the
         image's own health check rather than for an open port, reads the log with
         `docker logs`, and restarts by removing the container and running a new one
         on the same volume — what an upgrade does.
@@ -241,6 +242,10 @@ class Runner:
     def stop(self) -> None:
         raise NotImplementedError
 
+    def cleanup(self) -> None:
+        """At the end of the run, passed or failed: stop, and remove what was made."""
+        self.stop()
+
     def wait_until_up(self, surfaces: Surfaces) -> None:
         deadline = time.monotonic() + PATIENCE_SECONDS
         while time.monotonic() < deadline:
@@ -316,13 +321,23 @@ class ContainerRunner(Runner):
     bare = "no SIMPLE_A2A_* variable set beyond the two the image itself carries"
 
     def __init__(
-        self, engine: str, image: str, name: str, volume: str, ports: tuple[int, ...]
+        self,
+        engine: str,
+        image: str,
+        name: str,
+        ports: tuple[int, ...],
+        volume: str | None = None,
+        keep_volume: bool = False,
     ) -> None:
         self.engine = engine
         self.image = image
         self.name = name
-        self.volume = volume
         self.ports = ports
+        # A volume of this run's own unless one is named: a fixed name would hand
+        # the next run the holdings — and the secret — of the last one, and its
+        # first start would then not be a first start at all.
+        self.volume = volume or f"simple-a2a-smoke-{secrets.token_hex(6)}"
+        self.keep_volume = keep_volume
         self.earlier = ""
 
     def _run(self, *arguments: str) -> str:
@@ -394,17 +409,30 @@ class ContainerRunner(Runner):
     def log(self) -> str:
         return self.earlier + self._run("logs", self.name)
 
-    def stop(self) -> None:
+    def _quietly(self, *arguments: str) -> None:
         subprocess.run(
-            [self.engine, "rm", "--force", self.name],
+            [self.engine, *arguments],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
         )
 
+    def stop(self) -> None:
+        self._quietly("rm", "--force", self.name)
+
+    def cleanup(self) -> None:
+        # The volume holds the secret this run generated. It goes with the run,
+        # passed or failed, unless keeping it was asked for by name.
+        self.stop()
+        if not self.keep_volume:
+            self._quietly("volume", "rm", "--force", self.volume)
+
 
 # ------------------------------------------------------- the token-free addresses
 
+
+#: What every surface answers without a token, whatever else it offers.
+MINIMUM_TOKEN_FREE = {"/", "/guide", "/health", "/build", "/skill.zip", "/openapi.json"}
 
 ADDRESS_IN_TEXT = r"[^\s)`>\]\"'<]*"
 
@@ -436,7 +464,9 @@ def token_free(base: str, surface: str) -> list[str]:
     """Derive the token-free addresses of one surface from the running instance."""
     description = call("GET", f"{base}/openapi.json")
     expect_status(description, 200, f"{surface} /openapi.json")
-    paths: dict[str, dict[str, Any]] = description.json().get("paths") or {}
+    paths = description.json().get("paths")
+    if not isinstance(paths, dict) or not paths:
+        raise Failure(f"{surface}: the interface description has no paths")
     entry = call("GET", f"{base}/")
     expect_status(entry, 200, f"{surface} entry")
     named = links_on(entry.text, base)
@@ -466,6 +496,14 @@ def token_free(base: str, surface: str) -> list[str]:
     )
     if unknown:
         raise Failure(f"{surface}: the entry page names addresses that do not exist: {unknown}")
+    # Derived is only as good as what it was derived from. A description that has
+    # lost its token-free routes would leave next to nothing to check, and that
+    # nothing would pass; so the floor every surface has is held explicitly.
+    absent = sorted(MINIMUM_TOKEN_FREE - found)
+    if absent:
+        raise Failure(f"{surface}: no token-free address for {', '.join(absent)}")
+    if not any(path.startswith("/guide/") for path in found):
+        raise Failure(f"{surface}: not one guide part was found")
     return sorted(found)
 
 
@@ -785,8 +823,22 @@ class Run:
         ]
 
 
+#: Anything shaped like a secret of this service: a long run of the identifier
+#: alphabet. Generated secrets, tokens and invitations all are one.
+SECRET_SHAPED = re.compile(r"[A-Za-z0-9_-]{32,}")
+
+
 def redacted(text: str, secret: str) -> str:
-    return text.replace(secret, "<the secret>") if secret else text
+    """Text fit to print: the secret, and everything shaped like one, masked.
+
+    Not only the secret that was found: when the line that names it does not
+    match, nothing was found, and the log excerpt printed on failure would carry
+    it unmasked. So the shape is masked whether or not the value is known —
+    which also covers a token that turns up in an answer quoted in a failure.
+    """
+    if secret:
+        text = text.replace(secret, "<the secret>")
+    return SECRET_SHAPED.sub("<masked>", text)
 
 
 def execute(run: Run) -> int:
@@ -803,7 +855,7 @@ def execute(run: Run) -> int:
                 return 1
             print(f"ok   {number:2d} {name}: {detail}", flush=True)
     finally:
-        run.runner.stop()
+        run.runner.cleanup()
     print("smoke test passed", flush=True)
     return 0
 
@@ -853,7 +905,14 @@ def arguments(argv: list[str] | None) -> argparse.Namespace:
     container = modes.add_parser("container", help="run an image")
     container.add_argument("--image", required=True)
     container.add_argument("--name", default="simple-a2a-smoke")
-    container.add_argument("--volume", default="simple-a2a-smoke-data")
+    container.add_argument(
+        "--volume", help="the volume to use; default: a new one for this run, removed after it"
+    )
+    container.add_argument(
+        "--keep-volume",
+        action="store_true",
+        help="leave the volume in place afterwards; it holds the generated secret",
+    )
     container.add_argument("--engine", default="docker", help="docker or podman")
     return parser.parse_args(argv)
 
@@ -880,7 +939,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     if given.mode == "container":
         ports = tuple(port_of(base) for _, base in surfaces.all())
-        runner: Runner = ContainerRunner(given.engine, given.image, given.name, given.volume, ports)
+        runner: Runner = ContainerRunner(
+            given.engine, given.image, given.name, ports, given.volume, given.keep_volume
+        )
         return execute(Run(runner, surfaces, given.expect_build, given.expect_built_at))
     with work_directory(given.work_dir) as work:
         runner = ProcessRunner(shlex.split(given.command), dict(given.env), work)

@@ -123,3 +123,97 @@ def test_a_check_that_does_not_hold_fails_the_run_and_is_named(
     assert status == 1
     assert "FAIL 12 the build stamp" in out
     assert "smoke test passed" not in out
+
+
+# ------------------------------------------------------- what it must never do
+
+
+class LoggedOnly(smoke.Runner):
+    """A runner whose service is up at once and whose log is given."""
+
+    def __init__(self, log: str) -> None:
+        self.text = log
+        self.cleaned = False
+
+    def start(self) -> None:
+        pass
+
+    def wait_until_up(self, surfaces) -> None:
+        pass
+
+    def log(self) -> str:
+        return self.text
+
+    def stop(self) -> None:
+        pass
+
+    def cleanup(self) -> None:
+        self.cleaned = True
+
+
+def test_a_secret_line_it_cannot_read_is_never_printed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When the line does not match, no secret is known — and the log excerpt
+    printed on failure must still not carry it."""
+    leaked = "Q" * 20 + "x_-" * 5 + "7" * 10
+    runner = LoggedOnly(
+        f"INFO starting\nWARNING simple_a2a The administration secret is now {leaked}, "
+        "written somewhere\nINFO serving\n"
+    )
+    surfaces = smoke.Surfaces("http://127.0.0.1:1", "http://127.0.0.1:2", "http://127.0.0.1:3")
+
+    status = smoke.execute(smoke.Run(runner, surfaces, None, None))
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "FAIL  2 the secret in the log" in captured.out
+    assert "the end of the service's log" in captured.err, "the excerpt is printed"
+    assert leaked not in captured.out + captured.err
+    assert runner.cleaned, "and what the run made is removed, failed or not"
+
+
+def test_an_interface_description_without_paths_fails_loudly() -> None:
+    """Derived addresses are only as good as the description; an empty one is not
+    a surface with nothing to check."""
+    import http.server
+    import threading
+
+    class Empty(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            body = b'{"openapi": "3.1.0", "paths": {}}' if self.path == "/openapi.json" else b"#"
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Empty)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(smoke.Failure, match="no paths"):
+            smoke.token_free(f"http://127.0.0.1:{server.server_port}", "participants")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_each_container_run_has_a_volume_of_its_own_and_removes_it(tmp_path: Path) -> None:
+    """A fixed volume would hand the next run the holdings and the secret of the last."""
+    calls = tmp_path / "calls"
+    engine = tmp_path / "engine"
+    engine.write_text(f'#!/bin/sh\necho "$@" >> {calls}\n', encoding="utf-8")
+    engine.chmod(0o755)
+
+    first = smoke.ContainerRunner(str(engine), "image", "one", (1, 2, 3))
+    second = smoke.ContainerRunner(str(engine), "image", "two", (1, 2, 3))
+    kept = smoke.ContainerRunner(str(engine), "image", "three", (1, 2, 3), "mine", True)
+    for runner in (first, second, kept):
+        runner.cleanup()
+
+    assert first.volume != second.volume
+    made = calls.read_text(encoding="utf-8").splitlines()
+    assert f"volume rm --force {first.volume}" in made
+    assert f"volume rm --force {second.volume}" in made
+    assert not any("mine" in line for line in made), "a volume kept by request stays"

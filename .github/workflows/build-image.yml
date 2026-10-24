@@ -25,8 +25,9 @@
 # `pip install` gets, including the copy of the MCP program the wheel carries.
 #
 # The image: built with the commit as its build stamp and the build time beside
-# it, started with nothing set but a named volume, and restarted as a new
-# container on the same volume — which is what an upgrade does, and the only way
+# it, started with nothing set but a volume of its own — removed afterwards,
+# because it holds the secret the run generated — and restarted as a new
+# container on the same volume, which is what an upgrade does, and the only way
 # to show that the holdings and the secret live on the volume. The tested image
 # is saved as a file and handed on; the push loads that file rather than
 # building again, because a second build is a second artefact that nobody has
@@ -40,7 +41,9 @@
 #   or nothing is published — a wheel called 0.1.0.dev0 under a release v0.1.0
 #   is two answers to "which version is this".
 # - a manual run builds and smoke-tests, and pushes only when asked to, under
-#   `sha-<commit>` and never as `latest`: a manual run is not a release.
+#   `sha-<commit>` and never as `latest`: a manual run is not a release — not
+#   even one started on a tag. Only the push of a tag counts as one, so every
+#   step that releases asks for the event, not only for the ref.
 # - a push to a branch publishes nothing. The suite for branches is ci.yml.
 #
 # Write permissions sit only in the job that uses them: packages for the push,
@@ -69,13 +72,22 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with: { python-version: "3.13" }
       - name: "a tag names the version the package says"
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           version="$(uv run --no-project python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
             echo "::error::the tag is ${GITHUB_REF_NAME}, the package says ${version}"
             exit 1
           fi
+      # The smoke test's own tests: that the addresses it derives are the ones
+      # the code builds, counted from the routes and the guide parts, and that a
+      # check which does not hold fails the run. Without this a tag on a commit
+      # that never went through ci.yml would publish on a smoke test nobody
+      # checked.
+      - name: "the smoke test is itself tested"
+        run: |
+          uv sync --locked --extra dev
+          uv run pytest -q tests/test_smoke.py
       - name: "wheel and sdist"
         run: uv build --out-dir dist
       - name: "the wheel in an environment with nothing else in it"
@@ -129,7 +141,6 @@ jobs:
           container
           --image simple-a2a:smoke
           --name simple-a2a-smoke
-          --volume simple-a2a-smoke-data
       - name: "the tested image as a file"
         run: docker save simple-a2a:smoke | gzip > simple-a2a-image.tar.gz
       - uses: actions/upload-artifact@v4
@@ -143,7 +154,7 @@ jobs:
     name: "push the image that passed"
     needs: [package, image]
     if: >-
-      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && inputs.push)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -163,7 +174,7 @@ jobs:
       - name: "tag and push"
         run: |
           repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/simple-a2a"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tags=("${GITHUB_REF_NAME#v}" latest)
           else
             tags=("sha-${GITHUB_SHA}")
@@ -176,7 +187,7 @@ jobs:
   draft-release:
     name: "a draft release with wheel and sdist"
     needs: [package, image, publish-image]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
