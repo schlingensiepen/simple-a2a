@@ -68,8 +68,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      # setup-uv publishes no major tags since v8, only immutable releases.
+      - uses: astral-sh/setup-uv@v10.3.2
         with: { python-version: "3.13" }
       - name: "a tag names the version the package says"
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -105,7 +106,7 @@ jobs:
           process
           --command "$RUNNER_TEMP/clean/bin/simple-a2a"
           --env "A2A_BUILD=$GITHUB_SHA"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: package
           path: dist/
@@ -117,12 +118,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: "the build time"
         id: stamp
         run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: "the image builds"
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Containerfile
@@ -143,7 +144,7 @@ jobs:
           --name simple-a2a-smoke
       - name: "the tested image as a file"
         run: docker save simple-a2a:smoke | gzip > simple-a2a-image.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: image
           path: simple-a2a-image.tar.gz
@@ -162,11 +163,11 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: image }
       - name: "load the tested image, not a new build"
         run: gunzip -c simple-a2a-image.tar.gz | docker load
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -193,7 +194,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: package, path: dist }
       - name: "create the release as a draft"
         env:

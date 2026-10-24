@@ -6,8 +6,9 @@ jobs:
   lint-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      # setup-uv publishes no major tags since v8, only immutable releases.
+      - uses: astral-sh/setup-uv@v10.3.2
         with: { python-version: "3.13" }
       - run: uv sync --locked --extra dev
       - run: uv run ruff check src tests tools mcp
