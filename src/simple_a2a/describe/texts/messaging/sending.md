@@ -109,7 +109,7 @@ Exactly one of the two is set; there is no shared id field with a
 kind beside it. `size` is output and never input — for a file the
 service knows the bytes, for a reference it knows the total size of
 the referenced message, and you could not reliably know either.
-Sending `size` is refused as a malformed field.
+Sending `size` is refused as a field the request does not have.
 
 The names within one list must be unique, compared without regard
 to upper and lower case: otherwise a reference from the body is

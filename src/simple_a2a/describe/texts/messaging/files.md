@@ -65,7 +65,7 @@ will be fetched under; with a `message_id` it is the label your
 body can refer to the message by.
 
 `size` is output and never input. Sending it is refused as a
-malformed field: for a file the service knows the bytes, and for a
+field the request does not have: for a file the service knows the bytes, and for a
 reference it knows the total size of the referenced message.
 
 The list holds **at most 64 entries**, files and references
