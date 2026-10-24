@@ -189,9 +189,8 @@ def build() -> Register:
         "POST /peers/messages",
         Type.INVALID_INPUT,
         "Exactly one of `body` and `body_file_id` is filled, and each attachment entry has "
-        "exactly one of `file_id` and `message_id`. `size` is never sent in: we know the "
-        "bytes of a file and the total of a referenced message, and you cannot. An "
-        "attachment name is not a path and carries no control characters.",
+        "exactly one of `file_id` and `message_id`. An attachment name is not a path and "
+        "carries no control characters.",
     )
 
     _op(
@@ -222,8 +221,7 @@ def build() -> Register:
         "POST /services/messages",
         Type.INVALID_INPUT,
         "`recipient` is one name. Exactly one of `body` and `body_file_id` is filled, and "
-        "each attachment entry has exactly one of `file_id` and `message_id`. `size` is "
-        "never sent in.",
+        "each attachment entry has exactly one of `file_id` and `message_id`.",
     )
 
     _op(
