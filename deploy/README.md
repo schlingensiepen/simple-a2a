@@ -2,7 +2,7 @@
 
 One artefact leaves the build in three forms: the **package** (a wheel, installed
 with `pip install` and started as `simple-a2a`), the **image**
-(`ghcr.io/OWNER/simple-a2a`), and this directory — the image behind a reverse
+(`ghcr.io/schlingensiepen/simple-a2a`), and this directory — the image behind a reverse
 proxy, as a compose file. All three are the same code; the build publishes the
 package and the image only after the smoke test has started each of them.
 
@@ -12,8 +12,7 @@ package and the image only after the smoke test has started each of them.
 | `Caddyfile` | the proxy: TLS, the three host names, the forwarded headers |
 | `compose.no-proxy.yaml` | the image with its ports published directly, and its price |
 
-Replace `OWNER` with the account the image is published under and the
-`example.org` names with your own, then:
+Replace the `example.org` names with your own, then:
 
 ```sh
 docker compose up -d          # or: podman compose up -d

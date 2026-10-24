@@ -14,10 +14,9 @@ host the service runs on.
 
 ## Status
 
-**This is the project scaffolding.** The layout, the licence, the build and
-the checks are here; the service is not. Starting it prints a line saying so
-and exits non-zero. The sections below describe what is being built, in the
-present tense, because it is specified — not because it runs yet.
+The service runs: all three surfaces, the guide on each of them, the skill
+package and the MCP server. It has not had a release yet; the version stays a
+development version until the first tag.
 
 ## Three surfaces
 
@@ -100,7 +99,7 @@ message names the parameter.
 - **The package** — a wheel (and an sdist) of this tree. `pip install` it and
   start `simple-a2a`; the holdings go to the user's state directory unless
   `SIMPLE_A2A_DATA_DIR` says otherwise.
-- **The image** — `ghcr.io/OWNER/simple-a2a`, built from the `Containerfile`:
+- **The image** — `ghcr.io/schlingensiepen/simple-a2a`, built from the `Containerfile`:
   the installed package and nothing else, running as uid 999, with its data in
   `/var/lib/simple-a2a` and a health check that asks every surface that is on.
 - **`deploy/`** — the image behind a reverse proxy as a compose file, each

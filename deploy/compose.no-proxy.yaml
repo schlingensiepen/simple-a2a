@@ -14,12 +14,11 @@
 # entry pages comes from the Host header the caller sends, and reads `http`,
 # which is now the truth.
 #
-# Replace OWNER with the account the image is published under.
 name: simple-a2a
 
 services:
   simple-a2a:
-    image: ghcr.io/OWNER/simple-a2a:latest
+    image: ghcr.io/schlingensiepen/simple-a2a:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:8251:8251"
