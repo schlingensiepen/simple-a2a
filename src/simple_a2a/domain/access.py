@@ -14,6 +14,7 @@ is decided where the texts are.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 
 from simple_a2a.core import limits, names, tokens
@@ -650,6 +651,13 @@ class Window:
                 "limit", limit=limits.WINDOW_LIMIT_MAX, actual=made.limit, unit="entries"
             )
         return made
+
+    @staticmethod
+    def whole() -> Window:
+        """Every entry, with no limit: for a surface that leaves some entries out or
+        counts them all before it applies the caller's window, so that paging through
+        what it shows has neither gaps nor repetitions."""
+        return Window(offset=0, limit=sys.maxsize)
 
     def over[T](self, items: list[T]) -> list[T]:
         return items[self.offset : self.offset + self.limit]

@@ -8,6 +8,8 @@ promise that only shows up in combination shows up here.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from conftest import bearer
 from fastapi.testclient import TestClient
@@ -907,3 +909,64 @@ def test_the_description_says_the_self_image_at_redemption_is_for_a_service_only
     assert refused.status_code == 400
     assert refused.json()["type"] == "invalid-input"
     assert "A **team member** does not send that field at all" in refused.json()["message"]
+
+
+# ------------------------------------------------- long listings, paged to the end
+
+#: More than the largest window, so that no single call could hold the list.
+MANY = 103
+
+LISTED = re.compile(r"^- \*\*(.+?)\*\*", re.MULTILINE)
+
+
+def paged(client: TestClient, address: str, headers: dict[str, str], limit: int) -> list[str]:
+    """Every name a listing gives, window after window, until a window comes back short."""
+    names: list[str] = []
+    offset = 0
+    while True:
+        answer = client.get(address, params={"offset": offset, "limit": limit}, headers=headers)
+        assert answer.status_code == 200, answer.text
+        if headers.get("Accept") == "application/json":
+            page = [entry["name"] for entry in answer.json()["entries"]]
+        else:
+            page = LISTED.findall(answer.text)
+        names.extend(page)
+        if len(page) < limit:
+            return names
+        offset += limit
+
+
+def test_peers_pages_through_a_team_larger_than_any_window(
+    admin: TestClient, participants: TestClient
+) -> None:
+    """Every other member exactly once, in prose and as data, at any window size."""
+    a_team(admin)
+    reader = joined(admin, participants, "Reader")
+    others = [f"Member {number:03d}" for number in range(MANY)]
+    for name in others:
+        joined(admin, participants, name)
+
+    for limit in (25, 100, 7):
+        for accept in ({}, {"Accept": "application/json"}):
+            names = paged(participants, "/peers", bearer(reader) | accept, limit)
+            assert sorted(names) == sorted(others), (limit, accept)
+
+
+def test_services_pages_through_a_registry_larger_than_any_window(
+    admin: TestClient, participants: TestClient
+) -> None:
+    a_team(admin)
+    master = joined(admin, participants, "Anna")
+    services = [f"service-{number:03d}" for number in range(MANY)]
+    for name in services:
+        voucher = participants.post(
+            "/invitations/service",
+            json={"service_name": name, "display_name": f"for {name}"},
+            headers=bearer(master),
+        ).json()["invitation"]
+        participants.post(
+            "/invitations/redeem", json={"invitation": voucher, "member_self_image": "Answers."}
+        )
+
+    for limit in (25, 100):
+        assert sorted(paged(participants, "/services", bearer(master), limit)) == services

@@ -8,6 +8,8 @@ is no route on this surface that changes anything.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from conftest import bearer
 from fastapi.testclient import TestClient
@@ -528,3 +530,78 @@ def test_a_moment_the_holdings_do_not_know_is_null_and_not_invented(
     assert anna["token_revoked_at"] is None
     assert anna["joined_at"].endswith("Z")
     assert "Realm master right last given: not recorded." in page
+
+
+# ------------------------------------------------- long listings, paged to the end
+
+#: More than the largest window, so that no single call could hold the list.
+MANY = 103
+
+LISTED = re.compile(r"^- \*\*(.+?)\*\*", re.MULTILINE)
+
+
+def paged(
+    client: TestClient, address: str, headers: dict[str, str], limit: int, field: str
+) -> list[str]:
+    """Every name a listing gives, window after window, until a window comes back short."""
+    names: list[str] = []
+    offset = 0
+    while True:
+        answer = client.get(address, params={"offset": offset, "limit": limit}, headers=headers)
+        assert answer.status_code == 200, answer.text
+        if headers.get("Accept") == "application/json":
+            page = [entry[field] for entry in answer.json()["entries"]]
+        else:
+            page = LISTED.findall(answer.text)
+        names.extend(page)
+        if len(page) < limit:
+            return names
+        offset += limit
+
+
+def test_the_teams_page_through_more_than_any_window(
+    admin: TestClient, observation: TestClient
+) -> None:
+    eye = bearer(watching(admin))
+    teams = ["kitchen"] + [f"team {number:03d}" for number in range(MANY)]
+    for name in teams[1:]:
+        admin.post("/realms/household/teams", json={"team_name": name, "team_purpose": "x"})
+
+    for limit in (25, 100):
+        for accept in ({}, {"Accept": "application/json"}):
+            names = paged(observation, "/teams", eye | accept, limit, "team_name")
+            assert sorted(names) == sorted(teams), (limit, accept)
+
+
+def test_the_members_of_a_team_page_through_more_than_any_window(
+    admin: TestClient, participants: TestClient, observation: TestClient
+) -> None:
+    eye = bearer(watching(admin))
+    members = [f"Member {number:03d}" for number in range(MANY)]
+    for name in members:
+        member(admin, participants, name)
+
+    for limit in (25, 100):
+        for accept in ({}, {"Accept": "application/json"}):
+            names = paged(observation, "/teams/kitchen/peers", eye | accept, limit, "name")
+            assert sorted(names) == members, (limit, accept)
+
+
+def test_the_services_page_through_more_than_any_window(
+    admin: TestClient, participants: TestClient, observation: TestClient
+) -> None:
+    eye = bearer(watching(admin))
+    master = member(admin, participants, "Anna")["token"]
+    services = [f"service-{number:03d}" for number in range(MANY)]
+    for name in services:
+        voucher = participants.post(
+            "/invitations/service",
+            json={"service_name": name, "display_name": f"for {name}"},
+            headers=bearer(master),
+        ).json()["invitation"]
+        participants.post(
+            "/invitations/redeem", json={"invitation": voucher, "member_self_image": "Answers."}
+        )
+
+    for limit in (25, 100):
+        assert sorted(paged(observation, "/services", eye, limit, "service_name")) == services

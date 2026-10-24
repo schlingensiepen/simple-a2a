@@ -292,7 +292,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         with guard("GET /peers"):
             window = access.Window.of(offset, limit)
             everyone = access.members(
-                context, caller.realm_id, caller.team_id, access.Window.of(0, 100)
+                context, caller.realm_id, caller.team_id, access.Window.whole()
             )
             shown = [entry for entry in everyone if entry["member_name"] != caller.name]
             if http.wants_data(request):
@@ -376,7 +376,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     ) -> Response:
         with guard("GET /services"):
             window = access.Window.of(offset, limit)
-            everyone = access.services(context, caller.realm_id, access.Window.of(0, 100))
+            everyone = access.services(context, caller.realm_id, access.Window.whole())
             return http.prose(
                 prose.services(
                     entries=window.over(everyone),

@@ -174,7 +174,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     ) -> Response:
         with guard("GET /teams"):
             window = access.Window.of(offset, limit)
-            everything = access.teams(context, caller.realm_id, access.Window.of(0, 100))
+            everything = access.teams(context, caller.realm_id, access.Window.whole())
             if http.wants_data(request):
                 return JSONResponse(
                     {
@@ -252,7 +252,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
         with guard("GET /teams/{team}/peers"):
             team_id = team_of(caller, team)
             window = access.Window.of(offset, limit)
-            everybody = access.members(context, caller.realm_id, team_id, access.Window.of(0, 100))
+            everybody = access.members(context, caller.realm_id, team_id, access.Window.whole())
             if http.wants_data(request):
                 return JSONResponse(
                     {"entries": [_member(entry) for entry in window.over(everybody)]},
@@ -359,7 +359,7 @@ def build_app(context: Context, *, build: dict[str, str]) -> FastAPI:
     ) -> Response:
         with guard("GET /services"):
             window = access.Window.of(offset, limit)
-            everything = access.services(context, caller.realm_id, access.Window.of(0, 100))
+            everything = access.services(context, caller.realm_id, access.Window.whole())
             return http.prose(
                 directories.services(
                     entries=window.over(everything),
