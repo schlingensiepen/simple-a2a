@@ -69,7 +69,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      # setup-uv publishes no major tags since v8, only immutable releases.
+      # setup-uv publishes no major tags since v8, only exact version tags.
       - uses: astral-sh/setup-uv@v10.3.2
         with: { python-version: "3.13" }
       - name: "a tag names the version the package says"
