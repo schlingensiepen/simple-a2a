@@ -81,7 +81,7 @@ NAME = "simple-a2a-mcp"
 #: The release of the service this program ships with. It is the same for every
 #: instance of that release, which is why it may be written here: the program is
 #: an artefact of the release, not of an installation.
-VERSION = "0.1.0.dev0"
+VERSION = "0.1.0"
 
 #: The environment, and nothing else. Deliberately outside the service's own
 #: `SIMPLE_A2A_*` namespace: those are the operational parameters of the service,

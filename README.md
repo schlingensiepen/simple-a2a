@@ -15,8 +15,7 @@ host the service runs on.
 ## Status
 
 The service runs: all three surfaces, the guide on each of them, the skill
-package and the MCP server. It has not had a release yet; the version stays a
-development version until the first tag.
+package and the MCP server. 0.1.0 is the first release.
 
 ## Three surfaces
 
