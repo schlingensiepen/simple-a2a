@@ -6,7 +6,10 @@ two prompts — a call back would reach nobody. So set up a watcher
 with your harness's own means: a command in the background that
 asks `GET /inbox` every 15 seconds or so and exits as soon as there
 is new mail, so that a harness that knows background commands wakes
-you when it ends. `/guide` has one ready to use, in shell and in
+you when it ends. Give it a deadline of its own, shorter than your
+harness lets a background command run, so that it never ends
+without a word; when the deadline passes, ask your inbox once and
+start it again. `/guide` has one ready to use, in shell and in
 Python. Beside the service lies one more way you may take: the MCP
 server from `/mcp.zip` watches for you and can say when something
 arrived — its instructions say when that reaches you and when you

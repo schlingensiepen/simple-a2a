@@ -8,8 +8,13 @@ or never. So the examples are taken out of the served texts and run, here, again
 real instance on real ports: still running while nothing arrives, ended within two
 intervals once something does.
 
+Each example also has a deadline of its own, because a harness may end a background
+command after a while, and a watcher ended without a word looks like an empty inbox.
+It ends with a line of its own once the deadline has passed, and not before.
+
 The one change made to them is the interval, from the recommended fifteen seconds to
-one, so that the test does not take minutes.
+one, so that the test does not take minutes — and, where the deadline is under test,
+its unit, from minutes to seconds.
 """
 
 from __future__ import annotations
@@ -153,11 +158,23 @@ def test_the_fact_and_the_watcher_stand_near_the_top_of_every_text() -> None:
     assert set(blocks(guide)) == {"sh", "python"}
 
 
-def runnable(code: str, language: str) -> list[str]:
-    """The example as written, with the interval shortened and nothing else changed."""
+#: The deadline the examples are given where it is under test, in seconds.
+DEADLINE = 4
+DEADLINE_LINE = b"Deadline passed"
+
+
+def runnable(code: str, language: str, *, deadline_in_seconds: bool = False) -> list[str]:
+    """The example as written, with the interval shortened and nothing else changed.
+
+    With `deadline_in_seconds`, `A2A_WATCH_MINUTES` is read as seconds instead.
+    """
     marker = {"sh": "sleep 15", "python": "time.sleep(15)"}[language]
     assert code.count(marker) == 1, "the recommended interval is where this test expects it"
     shortened = code.replace(marker, marker.replace("15", f"{INTERVAL:g}"))
+    if deadline_in_seconds:
+        minutes = {"sh": "${A2A_WATCH_MINUTES:-90} * 60", "python": '"90")) * 60'}[language]
+        assert shortened.count(minutes) == 1, "the deadline is where this test expects it"
+        shortened = shortened.replace(minutes, minutes.removesuffix(" * 60"))
     if language == "sh":
         return ["sh", "-c", shortened]
     return [sys.executable, "-c", shortened]
@@ -202,6 +219,7 @@ def test_the_examples_end_once_mail_arrives_and_not_before(instance: Instance) -
             took = time.monotonic() - arrived
             assert watcher.returncode == 0, (language, who, err)
             assert b"New mail" in out, (language, who)
+            assert DEADLINE_LINE not in out, (language, who)
             assert took <= 2 * INTERVAL + SLACK, f"{language} for {who} took {took:.1f}s"
     finally:
         for _, _, watcher in watchers:
@@ -230,3 +248,76 @@ def test_a_wrong_token_ends_the_watcher_at_once_instead_of_waking_later(
         )
         assert finished.returncode != 0, language
         assert b"New mail" not in finished.stdout, language
+
+
+def watch(
+    code: str, language: str, token: str, base: str, deadline: float = DEADLINE
+) -> subprocess.Popen[bytes]:
+    """The example with `A2A_WATCH_MINUTES` read as seconds and set to `deadline`."""
+    return subprocess.Popen(
+        runnable(code, language, deadline_in_seconds=True),
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "A2A_BASE": base,
+            "A2A_TOKEN": token,
+            "A2A_WATCH_MINUTES": f"{deadline:g}",
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_examples_end_at_their_own_deadline_with_a_line_of_their_own(
+    instance: Instance,
+) -> None:
+    """No mail: running until the deadline, then ended, saying it was the deadline."""
+    dora = instance.member("Dora")
+    watchers = [
+        (language, watch(code, language, dora, instance.base))
+        for language, code in blocks(served()[1]).items()
+    ]
+    started = time.monotonic()
+    try:
+        time.sleep(DEADLINE - INTERVAL - 0.5)
+        for language, watcher in watchers:
+            assert watcher.poll() is None, f"{language} ended before its deadline"
+        for language, watcher in watchers:
+            out, err = watcher.communicate(timeout=PATIENCE)
+            took = time.monotonic() - started
+            assert watcher.returncode == 0, (language, err)
+            assert DEADLINE_LINE in out, language
+            assert b"New mail" not in out, language
+            assert took <= DEADLINE + INTERVAL + SLACK, f"{language} took {took:.1f}s"
+    finally:
+        for _, watcher in watchers:
+            if watcher.poll() is None:
+                watcher.kill()
+                watcher.wait()
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_mail_before_the_deadline_still_ends_the_examples_with_the_new_mail_line(
+    instance: Instance,
+) -> None:
+    """A deadline of their own does not keep the examples from waking on mail."""
+    anton, emil = instance.member("Anton"), instance.member("Emil")
+    watchers = [
+        (language, watch(code, language, emil, instance.base, deadline=PATIENCE))
+        for language, code in blocks(served()[1]).items()
+    ]
+    try:
+        time.sleep(INTERVAL * 1.5)
+        for language, watcher in watchers:
+            assert watcher.poll() is None, f"{language} ended with nothing new"
+        instance.send(anton, "Emil", "before the deadline")
+        for language, watcher in watchers:
+            out, err = watcher.communicate(timeout=PATIENCE)
+            assert watcher.returncode == 0, (language, err)
+            assert b"New mail" in out, language
+            assert DEADLINE_LINE not in out, language
+    finally:
+        for _, watcher in watchers:
+            if watcher.poll() is None:
+                watcher.kill()
+                watcher.wait()

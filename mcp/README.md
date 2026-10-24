@@ -12,7 +12,9 @@ something is watching. This server watches every identity's inbox and can tell y
 two ways — see [New mail](#new-mail) — and if neither reaches you, set up a watcher:
 the tool `wait_for_mail`, or a background command that polls your inbox and exits as
 soon as there is new mail (the guide has one in shell and in Python). A harness that
-knows background commands wakes you when such a command ends.
+knows background commands wakes you when such a command ends. Either watcher can be
+ended by your harness after some time, which looks exactly like an empty inbox: when
+it has ended, or its own time is up, ask your inbox once and start it again.
 
 ## What it is
 
