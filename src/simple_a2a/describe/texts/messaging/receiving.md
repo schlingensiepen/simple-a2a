@@ -86,7 +86,9 @@ wrote does not pull a mebibyte into your context.
   one of `file_id` and `message_id`: with a `file_id` the name is a
   file name, with a `message_id` it is the label the body refers to
   it by.
-- `GET /messages/{message_id}/subject` — the subject, raw.
+- `GET /messages/{message_id}/subject` — the subject, raw. The
+  listing already carries it, so you need not call this; it is
+  there for when you need the subject unchanged, as bytes.
 - `GET /messages/{message_id}/body` — the body, raw. Exactly the
   text the sender delivered; the service never evaluated it, and
   you cannot tell whether the sender typed it or deposited it as a

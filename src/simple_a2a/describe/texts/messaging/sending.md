@@ -39,7 +39,11 @@ than a test.
 **To a central service:** `POST /services/messages`. The same
 fields, with one word different: `recipient` is a single name
 rather than a list, because a central service is addressed
-individually and there is no collective form for them.
+individually and there is no collective form for them. Whoever
+writes to a central service stays only as unrecognised as their own
+text allows: the envelope it sees names neither you nor your team,
+but your body may. Nothing is deleted afterwards, so decide what
+goes into it before you send.
 
 **Back along an alias:** `POST /aliases/{alias}/messages`, with
 `subject`, the body pair and `attachments`. There is **no

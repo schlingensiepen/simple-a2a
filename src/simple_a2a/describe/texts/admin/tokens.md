@@ -37,7 +37,9 @@ invitation into a team: `member_name`, `member_mission`,
 `display_name`, and out comes the `display_name`, the `invitation` in
 clear text, and beside it whom it is for: `member_name`, `team_name`
 and `realm_name`. Whoever redeems it becomes a realm master, with no
-parameter and no choice.
+parameter and no choice. If you want a member without that right,
+have a realm master of the team invite them, or revoke their realm
+master right here once the invitation has been redeemed.
 
 `POST /realms/{realm}/observer-tokens` issues an **observer token**
 for a realm: `display_name` in, and out comes the `display_name` and
@@ -113,8 +115,9 @@ a token — a token that merely asserted a property would be worse
 than an honestly kept right, and a right does not sit in a string
 you can hand out. It permits two things: obtaining an invitation for
 a central service, and appointing further realm masters inside one's
-own team. Every token you obtain from this administration carries
-it.
+own team. An invitation for a central service is not issued here:
+whoever holds the right obtains it with their own token. Every token
+you obtain from this administration carries it.
 
 Appointing happens inside a team, by someone who already has the
 right. Removing it happens only here. The asymmetry is deliberate:
