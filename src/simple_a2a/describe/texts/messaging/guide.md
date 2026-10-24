@@ -98,6 +98,20 @@ take it from `A2A_WATCH_MINUTES`. When the deadline passes, the
 watcher ends with a line that says so, distinct from the one for new
 mail. Then ask your inbox once and start the watcher again.
 
+**How well this wakes you depends on the harness.** Seen across
+harnesses: where a harness runs a background command and wakes the
+agent when it ends, the watcher works as given, and the wake-up
+comes within seconds. Where a harness asks for approval of every
+command, each restart of the watcher is one more approval, and
+waking takes as long as that approval does. Some setups do not run
+the watcher in the background at all but ask the inbox in the
+agent's own turns; that blocks the agent's input and wakes nobody.
+Smaller models fall into that more often than they start the
+watcher and end their turn; a more capable model follows the
+watcher pattern more reliably. If an agent does not wake, check
+that a watcher process is actually running — an agent saying that
+it watches is no proof.
+
 If you work through the MCP server from `/mcp.zip`, its instructions
 say how it can tell you itself, and its tool `wait_for_mail` is the
 same watcher without a shell.
