@@ -341,3 +341,45 @@ def test_every_other_input_error_keeps_the_operation_s_own_text(
         answer = participants.post("/peers/messages", json=wrong, headers=callers["peer"])
         assert answer.status_code == 400, wrong
         assert answer.json()["message"] == own, wrong
+
+
+# ------------------------------------------------------------- security
+
+
+def without_a_token(client: TestClient, path: str, verb: str, operation: dict[str, Any]) -> int:
+    """The status an operation answers when nothing is presented, with any path filled in."""
+    for parameter in operation.get("parameters") or []:
+        if parameter.get("in") == "path":
+            path = path.replace("{" + parameter["name"] + "}", "x")
+    if verb in ("post", "put", "patch"):
+        return client.request(verb.upper(), path, json={}).status_code
+    return client.request(verb.upper(), path).status_code
+
+
+@pytest.mark.parametrize("surface", ["participants", "no_token", "observation"])
+def test_exactly_the_operations_behind_a_token_declare_security(
+    surface: str, request: pytest.FixtureRequest
+) -> None:
+    """A 401 without a token, and the bearer scheme in the description, go together."""
+    client: TestClient = request.getfixturevalue(surface)
+    document = client.get("/openapi.json").json()
+    scheme = document["components"]["securitySchemes"]["bearer"]
+    assert (scheme["type"], scheme["scheme"]) == ("http", "bearer")
+
+    secured, open_ = [], []
+    for path, verbs in document["paths"].items():
+        for verb, operation in verbs.items():
+            status = without_a_token(client, path, verb, operation)
+            where = f"{verb.upper()} {path}"
+            if "security" in operation:
+                assert operation["security"] == [{"bearer": []}], where
+                assert status == 401, f"{where} declares security but answered {status}"
+                secured.append(where)
+            else:
+                assert status != 401, f"{where} answers 401 but declares no security"
+                open_.append(where)
+    assert secured, "no operation behind a token at all"
+    assert "GET /health" in open_, "the interface description itself answered above"
+    if surface == "participants":
+        assert "POST /invitations/redeem" in open_
+        assert {"GET /skill.zip", "GET /mcp.zip", "GET /guide"} <= set(open_)

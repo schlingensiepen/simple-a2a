@@ -20,6 +20,10 @@ What it insists on:
   any part of the guide. The base address belongs in exactly one place; a part
   that carries one is a part that is wrong the moment it is served from a second
   host name.
+- **An operation behind a token says so.** Every operation that reads the token
+  header declares the bearer scheme, and none that does not read it declares any;
+  a client generated from the description would otherwise send a token nowhere or
+  everywhere.
 - **A text for every rejection an operation can give.** Checked against the
   register rather than at the moment of failure, so a missing text is a red build
   and not a caller's afternoon.
@@ -98,6 +102,8 @@ def check_description(document: dict[str, Any], rules: Rules) -> Findings:
                 found.note(f"{where}: no description")
             for problem in _check_schemas(operation, where):
                 found.note(problem)
+            for problem in _check_security(document, operation, where):
+                found.note(problem)
 
     for name, schema in sorted((document.get("components", {}).get("schemas") or {}).items()):
         for problem in _check_fields(schema, f"{rules.surface} schema {name}"):
@@ -123,6 +129,26 @@ def _check_schemas(operation: dict[str, Any], where: str) -> list[str]:
     if body:
         problems += _check_fields(body.get("schema") or {}, f"{where} request")
     return problems
+
+
+def _check_security(document: dict[str, Any], operation: dict[str, Any], where: str) -> list[str]:
+    """Behind a token exactly when the token header is read, and with a declared scheme."""
+    reads_token = any(
+        parameter.get("in") == "header"
+        and str(parameter.get("name", "")).lower() == "authorization"
+        for parameter in operation.get("parameters") or []
+    )
+    declared = [name for entry in operation.get("security") or [] for name in entry]
+    if reads_token and not declared:
+        return [f"{where}: reads the token but declares no security"]
+    if declared and not reads_token:
+        return [f"{where}: declares security but works without a token"]
+    schemes = (document.get("components") or {}).get("securitySchemes") or {}
+    return [
+        f"{where}: security scheme {name!r} is not declared"
+        for name in declared
+        if (schemes.get(name) or {}).get("scheme") != "bearer"
+    ]
 
 
 def _check_fields(schema: dict[str, Any], where: str) -> list[str]:

@@ -127,6 +127,48 @@ def test_a_schema_component_is_checked_too() -> None:
     assert "Envelope.sender_name" in found.report()
 
 
+TOKEN_HEADER = {
+    "name": "authorization",
+    "in": "header",
+    "description": "The token.",
+    "schema": {"examples": ["Bearer <your token>"]},
+}
+BEARER = {"securitySchemes": {"bearer": {"type": "http", "scheme": "bearer"}}}
+
+
+def test_an_operation_behind_a_token_that_declares_it_passes() -> None:
+    document = described(parameters=[TOKEN_HEADER], security=[{"bearer": []}])
+    document["components"] = BEARER
+
+    assert gate.check_description(document, RULES)
+
+
+def test_an_operation_that_reads_the_token_without_declaring_security_fails() -> None:
+    found = gate.check_description(described(parameters=[TOKEN_HEADER]), RULES)
+
+    assert not found
+    assert "declares no security" in found.report()
+
+
+def test_an_operation_without_a_token_that_declares_security_fails() -> None:
+    document = described(security=[{"bearer": []}])
+    document["components"] = BEARER
+
+    found = gate.check_description(document, RULES)
+
+    assert not found
+    assert "works without a token" in found.report()
+
+
+def test_security_naming_a_scheme_that_is_not_declared_fails() -> None:
+    found = gate.check_description(
+        described(parameters=[TOKEN_HEADER], security=[{"bearer": []}]), RULES
+    )
+
+    assert not found
+    assert "'bearer' is not declared" in found.report()
+
+
 def test_a_placeholder_left_in_a_rendered_text_fails() -> None:
     """Run on what is served: a placeholder is only wrong once it is rendered."""
     found = gate.check_texts({"entry": "Reach it at %%BASE%%."})

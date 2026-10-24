@@ -464,8 +464,42 @@ def _pruned(document: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
+#: The name the token's security scheme goes by in the description.
+BEARER_SCHEME = "bearer"
+
+
+def _secured(document: dict[str, Any]) -> dict[str, Any]:
+    """The generated description, saying which operations need a token.
+
+    The header parameter alone says that a header is read, not that it is required
+    for authentication, and a generated client takes a declared scheme to mean the
+    second. So every operation that reads the token header — and only those —
+    declares the bearer scheme as well; the header parameter stays, described.
+    """
+    secured = False
+    for verbs in (document.get("paths") or {}).values():
+        for operation in verbs.values():
+            if not isinstance(operation, dict):
+                continue
+            if any(
+                parameter.get("in") == "header"
+                and str(parameter.get("name", "")).lower() == "authorization"
+                for parameter in operation.get("parameters") or []
+            ):
+                operation["security"] = [{BEARER_SCHEME: []}]
+                secured = True
+    if secured:
+        document.setdefault("components", {}).setdefault("securitySchemes", {})[BEARER_SCHEME] = {
+            "type": "http",
+            "scheme": "bearer",
+            "description": "The token, as `Authorization: Bearer <token>`. The entry of "
+            "this surface says which token that is.",
+        }
+    return document
+
+
 def serve_described_openapi(app: FastAPI) -> None:
-    """Make the application serve the pruned description rather than the raw one.
+    """Make the application serve the pruned, secured description rather than the raw one.
 
     Replaced on the application rather than filtered at the route, so that anything
     reading `app.openapi()` — the gate in the tests included — sees exactly what a
@@ -476,7 +510,7 @@ def serve_described_openapi(app: FastAPI) -> None:
 
     def described() -> dict[str, Any]:
         if app.openapi_schema is None:
-            app.openapi_schema = _pruned(generated())
+            app.openapi_schema = _secured(_pruned(generated()))
         return app.openapi_schema
 
     app.openapi = described  # type: ignore[method-assign]
