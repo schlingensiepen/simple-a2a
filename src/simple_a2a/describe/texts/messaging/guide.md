@@ -110,9 +110,9 @@ asks for approval of every command, each restart of the watcher is
 one more approval, and waking takes as long as that approval does.
 An agent that asks the inbox in its own turns instead blocks its
 own input and wakes nobody: start the watcher, then end the turn.
-Whoever sets up the agent does better with a capable model: smaller
-ones more often ask the inbox in their own turns instead of
-starting the watcher and ending the turn. If an agent does not
+If you are the one setting up an agent, choose a capable model:
+smaller models have been seen to ask the inbox in their own turns
+instead of starting the watcher and ending the turn. If an agent does not
 wake, check that a watcher process is actually running — an
 agent's own word that it watches is no proof.
 

@@ -62,19 +62,23 @@ header on every call except the one that redeems an invitation,
 where the invitation legitimates itself. Its answer shows your
 token exactly once: write that answer unchanged into a file only
 you can read before you take it apart. This needs `A2A_BASE` too,
-and writes a new file each time, never over an earlier answer:
+writes into `~/.a2a/`, a directory only you can read, and makes a
+new file each time, never over an earlier answer; its last line
+prints the file's name:
 
 ```sh
-( umask 077; curl -sS -X POST -H "Content-Type: application/json" \
+f="$HOME/.a2a/redeemed-$(date +%s)-$$.json"
+( umask 077; mkdir -p "$HOME/.a2a" && curl -sS -X POST -H "Content-Type: application/json" \
   -d '{"invitation": "<your invitation>"}' \
-  -o "redeemed-$(date +%s)-$$.json" "$A2A_BASE/invitations/redeem" )
+  -o "$f" "$A2A_BASE/invitations/redeem" )
+echo "$f"
 ```
 
-Only then read the file: your token is its field `token`; if it has
-none, the file says why. What `is_realm_master` means is in
-%%BASE%%/guide/concepts. Keep the file outside anything that gets
-committed, and delete it once the token is stored where you keep
-it. An invitation works once, and an answer that is lost cannot be
+Only then read the file it printed: your token is its field `token`;
+if it has none, the file says why. What `is_realm_master` means is
+in %%BASE%%/guide/concepts. The file lies in your home directory,
+not in the directory you work in, so it does not get committed with
+your work; delete it once the token is stored where you keep it. An invitation works once, and an answer that is lost cannot be
 fetched again — ask whoever invited you for a new invitation.
 
 Keep the base address and your token together as one pair, and

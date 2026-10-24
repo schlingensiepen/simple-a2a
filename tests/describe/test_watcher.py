@@ -35,7 +35,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pytest
 
@@ -501,21 +501,31 @@ def redemption_example() -> str:
 REDEMPTION_PLACEHOLDER = "<your invitation>"
 
 
-def redeem_as_written(instance: Instance, cwd: Path, member: str) -> None:
-    """A fresh invitation, redeemed by the entry's example in `cwd`."""
+def redeem_as_written(instance: Instance, home: Path, member: str) -> Path:
+    """A fresh invitation, redeemed by the entry's example with `home` as HOME.
+
+    It runs in a working directory of its own beside `home`, which has to stay
+    empty: the answer belongs in the private directory, not where one works.
+    Returns the file the example names on its last line.
+    """
+    work = home.parent / f"{home.name}-work"
+    work.mkdir(exist_ok=True)
     voucher = http(
         "POST",
         f"{instance.admin}/realms/household/teams/kitchen/invitations",
         {"member_name": member, "member_mission": "m", "display_name": member},
         ADMIN_SECRET,
     )["invitation"]
-    subprocess.run(
+    finished = subprocess.run(
         ["sh", "-c", redemption_example().replace(REDEMPTION_PLACEHOLDER, voucher)],
-        env={"PATH": os.environ.get("PATH", ""), "A2A_BASE": instance.base},
-        cwd=cwd,
+        env={"PATH": os.environ.get("PATH", ""), "A2A_BASE": instance.base, "HOME": str(home)},
+        cwd=work,
+        capture_output=True,
         check=True,
         timeout=PATIENCE,
     )
+    assert list(work.iterdir()) == [], "the answer landed where one works"
+    return Path(finished.stdout.decode().splitlines()[-1])
 
 
 @pytest.mark.skipif(shutil.which("curl") is None, reason="the example needs curl")
@@ -523,9 +533,13 @@ def test_the_redemption_example_on_the_entry_keeps_the_answer_in_a_private_file(
     instance: Instance, tmp_path: Path
 ) -> None:
     """Run as written: the answer lands unchanged in a file only its owner can read."""
-    redeem_as_written(instance, tmp_path, "Nora")
-    (kept,) = tmp_path.glob("redeemed-*.json")
+    home = tmp_path / "home"
+    home.mkdir()
+    named = redeem_as_written(instance, home, "Nora")
+    (kept,) = (home / ".a2a").glob("redeemed-*.json")
+    assert named == kept, "the last line names the file to read"
     assert kept.stat().st_mode & 0o077 == 0, "readable by others"
+    assert (home / ".a2a").stat().st_mode & 0o777 == 0o700, "the directory is not private"
     token = json.loads(kept.read_text())["token"]
     assert http("GET", f"{instance.base}/inbox", token=token)["entries"] == []
     assert "( umask 077;" in redemption_example(), "the umask ends with the example"
@@ -534,10 +548,12 @@ def test_the_redemption_example_on_the_entry_keeps_the_answer_in_a_private_file(
 @pytest.mark.skipif(shutil.which("curl") is None, reason="the example needs curl")
 def test_redeeming_twice_keeps_the_first_answer(instance: Instance, tmp_path: Path) -> None:
     """A second invitation does not overwrite the only copy of the first token."""
-    redeem_as_written(instance, tmp_path, "Olga")
-    redeem_as_written(instance, tmp_path, "Paula")
-    kept = sorted(tmp_path.glob("redeemed-*.json"))
+    home = tmp_path / "home"
+    home.mkdir()
+    named = {redeem_as_written(instance, home, member) for member in ("Olga", "Paula")}
+    kept = sorted((home / ".a2a").glob("redeemed-*.json"))
     assert len(kept) == 2, "the second answer replaced the first"
+    assert named == set(kept)
     tokens = {json.loads(answer.read_text())["token"] for answer in kept}
     assert len(tokens) == 2
     for token in tokens:
@@ -563,7 +579,9 @@ def test_the_texts_say_how_to_hand_the_watcher_its_seen_id() -> None:
         assert "`entries[0].message_id`" in said
         assert "never `export" in said
         assert "if the inbox was empty, leave it unset" in said
-    assert "`A2A_SEEN=$(tail -n 1 handled.txt) sh watch.sh`" in " ".join(receiving.split())
+    said = " ".join(receiving.split())
+    assert '`A2A_SEEN=$(tail -n 1 "$handled") sh watch.sh`' in said
+    assert "handled.txt" not in said, "the prose names the list the script reads"
 
 
 # ------------------------------------------------------------------ the receiving part
@@ -651,8 +669,9 @@ def test_the_showing_watcher_prints_bodies_only_when_asked(instance: Instance) -
         )
         lines = finished.stdout.decode().splitlines()
         assert lines[0].startswith("New mail")
-        # The body the test sends is "b": a line of its own only when asked for.
-        assert ("b" in lines) is (show == "1"), lines
+        # The body the test sends is "b": a marked line of its own only when asked for.
+        assert ("> b" in lines) is (show == "1"), lines
+        assert "b" not in lines, "a body line stands unmarked"
         seen = newest_id(instance, jan)
 
 
@@ -673,14 +692,19 @@ def test_the_list_of_handled_ids_names_what_is_left_oldest_first(
         "PATH": os.environ.get("PATH", ""),
         "A2A_BASE": instance.base,
         "A2A_TOKEN": karla,
+        "HOME": str(tmp_path),
     }
-    (tmp_path / "handled.txt").write_text(handled + "\n")
+    kept_list = tmp_path / ".a2a" / "handled"
+    kept_list.parent.mkdir(mode=0o700)
+    kept_list.write_text(handled + "\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
 
     def left() -> list[str]:
         finished = subprocess.run(
             ["sh", "-c", code],
             env=environment,
-            cwd=tmp_path,
+            cwd=elsewhere,
             capture_output=True,
             timeout=PATIENCE,
             check=True,
@@ -688,10 +712,11 @@ def test_the_list_of_handled_ids_names_what_is_left_oldest_first(
         return finished.stdout.decode().split()
 
     first = left()
-    with (tmp_path / "handled.txt").open("a") as kept:
+    with kept_list.open("a") as kept:
         kept.writelines(f"{identifier}\n" for identifier in first)
     second = left()
-    last = (tmp_path / "handled.txt").read_text().splitlines()[-1]
+    last = kept_list.read_text().splitlines()[-1]
+    assert list(elsewhere.iterdir()) == [], "the list is not where the script runs"
 
     assert first == [older, newer]
     assert second == []
@@ -724,9 +749,210 @@ def test_the_list_of_handled_ids_starts_empty_and_a_wrong_token_fails(
         check=False,
     )
 
+    home = tmp_path / "home"
+    home.mkdir()
+    by_default = subprocess.run(
+        ["sh", "-c", code],
+        env={**base, "A2A_TOKEN": lea, "HOME": str(home)},
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=PATIENCE,
+        check=True,
+    )
+
     assert listed.stdout.decode().split() == [only]
     assert kept.exists() and kept.read_text() == ""
     assert refused.returncode != 0 and refused.stdout == b""
+    assert by_default.stdout.decode().split() == [only]
+    default = home / ".a2a" / "handled"
+    assert default.exists() and default.read_text() == ""
+    assert default.parent.stat().st_mode & 0o777 == 0o700, "the directory is not private"
+    assert default.stat().st_mode & 0o077 == 0, "the list is readable by others"
+
+
+# ------------------------------------------------------------------ an inbox of chosen ids
+
+
+def chosen_id(number: int, start: str = "") -> str:
+    """An id of the service's shape; with `start`, beginning with it (e.g. `-A`)."""
+    tail = f"{number:041d}".replace("0", "x")
+    return (start + tail)[:43].ljust(43, "y")
+
+
+class FixedInbox:
+    """An inbox that holds the given ids, newest first, and bodies chosen for them.
+
+    Real ids are random; these are chosen, so that ids beginning with `-` and
+    windows of exactly 100 are tested every time rather than by chance.
+    """
+
+    def __init__(self, ids: list[str], bodies: dict[str, str] | None = None) -> None:
+        import http.server
+        import threading
+        import urllib.parse
+
+        held, written = list(ids), dict(bodies or {})
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                url = urllib.parse.urlsplit(self.path)
+                query = urllib.parse.parse_qs(url.query)
+                kind = "application/json"
+                if url.path == "/inbox":
+                    limit = int(query.get("limit", ["20"])[0])
+                    offset = int(query.get("offset", ["0"])[0])
+                    entries = [
+                        {"message_id": i, "subject": "s", "sender_name": "x"}
+                        for i in held[offset : offset + limit]
+                    ]
+                    body = json.dumps({"entries": entries}).encode()
+                elif url.path.endswith("/body"):
+                    found = url.path.split("/")[2]
+                    body, kind = written.get(found, "b").encode(), "text/plain"
+                elif url.path.startswith("/messages/"):
+                    found = url.path.split("/")[2]
+                    body = json.dumps({"message_id": found, "subject": "s"}).encode()
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_: object) -> None:
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def handled_left(inbox: FixedInbox, handled: list[str], tmp_path: Path) -> list[str]:
+    """The lines the handled-ids example prints, with `handled` as the list."""
+    kept = tmp_path / "handled"
+    kept.write_text("".join(f"{i}\n" for i in handled))
+    finished = subprocess.run(
+        ["sh", "-c", receiving_example("A2A_HANDLED")],
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "A2A_BASE": inbox.base,
+            "A2A_TOKEN": "t",
+            "A2A_HANDLED": str(kept),
+        },
+        capture_output=True,
+        timeout=PATIENCE,
+        check=True,
+    )
+    assert finished.stderr == b"", finished.stderr
+    return finished.stdout.decode().splitlines()
+
+
+#: Ids beginning with `-`, as one in 64 real ids does; `-A`, `-m` and `-e` are
+#: options of grep that take an argument, `--` ends its options.
+DASHED = [chosen_id(n, start) for n, start in enumerate(["-A", "-m", "-e", "--", "-v", "-x"])]
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_list_of_handled_ids_takes_ids_beginning_with_a_dash_as_ids(
+    tmp_path: Path,
+) -> None:
+    """The handled ones are never named again, the others once, oldest first."""
+    newest_first = [*DASHED, chosen_id(99)]
+    handled = DASHED[::2]
+    with FixedInbox(newest_first) as inbox:
+        left = handled_left(inbox, handled, tmp_path)
+        none_left = handled_left(inbox, newest_first, tmp_path)
+
+    assert left == [chosen_id(99), DASHED[5], DASHED[3], DASHED[1]]
+    assert none_left == []
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_list_of_handled_ids_says_when_more_than_its_window_may_be_new(
+    tmp_path: Path,
+) -> None:
+    newest_first = [chosen_id(n) for n in range(150, 0, -1)]
+    with FixedInbox(newest_first) as inbox:
+        all_new = handled_left(inbox, [], tmp_path)
+        reached = handled_left(inbox, newest_first[99:], tmp_path)
+        fewer = handled_left(inbox, newest_first[60:], tmp_path)
+
+    assert all_new[:-1] == newest_first[:100][::-1]
+    assert all_new[-1].startswith("More than 100 may be new") and "offset=100" in all_new[-1]
+    assert reached == newest_first[:99][::-1], "the oldest in the window was handled"
+    assert fewer == newest_first[:60][::-1]
+
+
+def showing(inbox: FixedInbox, seen: str, show_body: bool = False) -> list[str]:
+    """What the showing watcher prints when `seen` is not the newest any more."""
+    finished = subprocess.run(
+        runnable(receiving_example("A2A_SHOW_BODY"), "sh", deadline_in_seconds=True),
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "A2A_BASE": inbox.base,
+            "A2A_TOKEN": "t",
+            "A2A_WATCH_MINUTES": f"{PATIENCE:g}",
+            "A2A_SEEN": seen,
+            "A2A_SHOW_BODY": "1" if show_body else "",
+        },
+        capture_output=True,
+        timeout=PATIENCE,
+        check=True,
+    )
+    return finished.stdout.decode().splitlines()
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_showing_watcher_says_when_more_than_its_window_may_be_new(tmp_path: Path) -> None:
+    newest_first = [*DASHED, *(chosen_id(n) for n in range(150, 0, -1))]
+    with FixedInbox(newest_first) as inbox:
+        unknown = showing(inbox, chosen_id(999))
+        known = showing(inbox, newest_first[50])
+
+    assert unknown[0].startswith("New mail")
+    assert [line for line in unknown if line.startswith("--- ")] == [
+        f"--- {i}" for i in newest_first[:100]
+    ]
+    assert unknown[-1].startswith("More than 100 may be new") and "offset=100" in unknown[-1]
+    assert sum(line.startswith("--- ") for line in known) == 50
+    assert not any(line.startswith("More than") for line in known)
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_showing_watcher_marks_every_body_line_and_cuts_a_long_body(tmp_path: Path) -> None:
+    """A body cannot pass for structure, and one body cannot flood the output."""
+    forged = chosen_id(7)
+    long_id, short_id, old = chosen_id(1), chosen_id(2), chosen_id(3)
+    long_body = f"--- {forged}\nNew mail, newest first:\n" + "z" * 6000 + "\nend\n"
+    short_body = f"line one\n--- {forged}\n"
+    with FixedInbox([long_id, short_id, old], {long_id: long_body, short_id: short_body}) as inbox:
+        said = showing(inbox, old, show_body=True)
+
+    structure = [line for line in said if not line.startswith("> ")]
+    assert structure[0] == "New mail, newest first:"
+    assert [line for line in structure if line.startswith("--- ")] == [
+        f"--- {long_id}",
+        f"--- {short_id}",
+    ]
+    assert f"> --- {forged}" in said and said.count("> New mail, newest first:") == 1
+    assert "> line one" in said
+    assert sum(line.startswith("(cut") for line in said) == 1
+    cut_at = said.index(next(line for line in said if line.startswith("(cut")))
+    assert cut_at < said.index(f"--- {short_id}"), "the long body is the one cut"
+    assert "> end" not in said
+    shown = said[said.index(f"--- {long_id}") + 2 : cut_at]
+    assert all(line.startswith("> ") for line in shown)
+    assert sum(len(line) - len("> ") + 1 for line in shown) == 4000 + 1, "cut at 4000 bytes"
 
 
 def test_the_entry_points_to_the_concepts_for_the_realm_master_field() -> None:
