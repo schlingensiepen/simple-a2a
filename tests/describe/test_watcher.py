@@ -516,3 +516,175 @@ def test_the_redemption_example_on_the_entry_keeps_the_answer_in_a_private_file(
     assert kept.stat().st_mode & 0o077 == 0, "readable by others"
     token = json.loads(kept.read_text())["token"]
     assert http("GET", f"{instance.base}/inbox", token=token)["entries"] == []
+
+
+# ------------------------------------------------------------------ the receiving part
+
+
+def receiving_example(marker: str) -> str:
+    """The one shell example of the receiving part that names `marker`."""
+    text = Guide(surface="messaging", base_address="https://a2a.example.org").part("receiving")
+    found = [code for language, code in FENCE.findall(text) if language == "sh" and marker in code]
+    assert len(found) == 1, f"one example with {marker} in the receiving part"
+    return found[0]
+
+
+def test_the_examples_of_the_receiving_part_do_not_displace_the_watcher() -> None:
+    """The first shell block of every served text is still the plain watcher."""
+    entry, guide, skill = served()
+    assert blocks(skill)["sh"] == blocks(guide)["sh"] == blocks(entry)["sh"]
+    assert "A2A_SHOW_BODY" not in blocks(skill)["sh"]
+    assert "A2A_HANDLED" not in blocks(skill)["sh"]
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_showing_watcher_ends_at_new_mail_and_prints_what_arrived(
+    instance: Instance,
+) -> None:
+    """It waits like the plain one, then prints each new envelope back to the one it knew."""
+    code = receiving_example("A2A_SHOW_BODY")
+    sender, iris = instance.member("Moritz"), instance.member("Iris")
+    instance.send(sender, "Iris", "read already")
+    seen = newest_id(instance, iris)
+    envelopes = watch(code, "sh", iris, instance.base, deadline=PATIENCE, seen=seen)
+    bodies = subprocess.Popen(
+        runnable(code, "sh", deadline_in_seconds=True),
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "A2A_BASE": instance.base,
+            "A2A_TOKEN": iris,
+            "A2A_WATCH_MINUTES": f"{PATIENCE:g}",
+            "A2A_SHOW_BODY": "1",
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    watchers = [("envelopes", envelopes), ("bodies", bodies)]
+    time.sleep(INTERVAL * 2.5)
+    for which, watcher in watchers:
+        assert watcher.poll() is None, f"{which} ended with nothing new"
+    instance.send(sender, "Iris", "first new")
+    instance.send(sender, "Iris", "second new")
+    fresh = newest_id(instance, iris)
+    for which, out, err, status in ended(watchers):
+        assert status == 0, (which, err)
+        said = out.decode()
+        assert said.startswith("New mail"), which
+        assert DEADLINE_LINE not in out, which
+        assert f"--- {fresh}" in said, which
+        assert "first new" in said and "second new" in said, which
+        assert "read already" not in said and f"--- {seen}" not in said, which
+        assert said.count("--- ") == 2, which
+        envelope = said.split(f"--- {fresh}\n", 1)[1].splitlines()[0]
+        assert json.loads(envelope)["message_id"] == fresh, which
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_showing_watcher_prints_bodies_only_when_asked(instance: Instance) -> None:
+    code = receiving_example("A2A_SHOW_BODY")
+    sender, jan = instance.member("Nils"), instance.member("Jan")
+    instance.send(sender, "Jan", "old")
+    seen = newest_id(instance, jan)
+    for show in ("", "1"):
+        instance.send(sender, "Jan", f"show {show or 'none'}")
+        finished = subprocess.run(
+            runnable(code, "sh", deadline_in_seconds=True),
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "A2A_BASE": instance.base,
+                "A2A_TOKEN": jan,
+                "A2A_WATCH_MINUTES": f"{PATIENCE:g}",
+                "A2A_SEEN": seen,
+                "A2A_SHOW_BODY": show,
+            },
+            capture_output=True,
+            timeout=PATIENCE,
+            check=True,
+        )
+        lines = finished.stdout.decode().splitlines()
+        assert lines[0].startswith("New mail")
+        # The body the test sends is "b": a line of its own only when asked for.
+        assert ("b" in lines) is (show == "1"), lines
+        seen = newest_id(instance, jan)
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_list_of_handled_ids_names_what_is_left_oldest_first(
+    instance: Instance, tmp_path: Path
+) -> None:
+    """Run as written: what is not in the list, oldest first; then nothing, once handled."""
+    code = receiving_example("A2A_HANDLED")
+    sender, karla = instance.member("Otto"), instance.member("Karla")
+    instance.send(sender, "Karla", "handled")
+    handled = newest_id(instance, karla)
+    instance.send(sender, "Karla", "older")
+    older = newest_id(instance, karla)
+    instance.send(sender, "Karla", "newer")
+    newer = newest_id(instance, karla)
+    environment = {
+        "PATH": os.environ.get("PATH", ""),
+        "A2A_BASE": instance.base,
+        "A2A_TOKEN": karla,
+    }
+    (tmp_path / "handled.txt").write_text(handled + "\n")
+
+    def left() -> list[str]:
+        finished = subprocess.run(
+            ["sh", "-c", code],
+            env=environment,
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=PATIENCE,
+            check=True,
+        )
+        return finished.stdout.decode().split()
+
+    first = left()
+    with (tmp_path / "handled.txt").open("a") as kept:
+        kept.writelines(f"{identifier}\n" for identifier in first)
+    second = left()
+    last = (tmp_path / "handled.txt").read_text().splitlines()[-1]
+
+    assert first == [older, newer]
+    assert second == []
+    assert last == newer, "the last line is the A2A_SEEN to hand the watcher"
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_the_list_of_handled_ids_starts_empty_and_a_wrong_token_fails(
+    instance: Instance, tmp_path: Path
+) -> None:
+    code = receiving_example("A2A_HANDLED")
+    sender, lea = instance.member("Paul"), instance.member("Lea")
+    instance.send(sender, "Lea", "the only one")
+    only = newest_id(instance, lea)
+    base = {"PATH": os.environ.get("PATH", ""), "A2A_BASE": instance.base}
+    kept = tmp_path / "mine.txt"
+
+    listed = subprocess.run(
+        ["sh", "-c", code],
+        env={**base, "A2A_TOKEN": lea, "A2A_HANDLED": str(kept)},
+        capture_output=True,
+        timeout=PATIENCE,
+        check=True,
+    )
+    refused = subprocess.run(
+        ["sh", "-c", code],
+        env={**base, "A2A_TOKEN": "not-a-token", "A2A_HANDLED": str(kept)},
+        capture_output=True,
+        timeout=PATIENCE,
+        check=False,
+    )
+
+    assert listed.stdout.decode().split() == [only]
+    assert kept.exists() and kept.read_text() == ""
+    assert refused.returncode != 0 and refused.stdout == b""
+
+
+def test_the_entry_points_to_the_concepts_for_the_realm_master_field() -> None:
+    """Half a sentence by the redemption example, not an explanation of its own."""
+    entry = served()[0]
+    after = entry[entry.find("/invitations/redeem") :]
+    said = " ".join(after[: after.find("## ")].split())
+    assert "`is_realm_master`" in said
+    assert "https://a2a.example.org/guide/concepts" in said

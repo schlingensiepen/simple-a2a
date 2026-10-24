@@ -66,7 +66,8 @@ curl -s -X POST -H "Content-Type: application/json" \
   -o redeemed.json "$A2A_BASE/invitations/redeem"
 ```
 
-Only then read the file: your token is its field `token`. An
+Only then read the file: your token is its field `token`, and
+what `is_realm_master` means is in %%BASE%%/guide/concepts. An
 invitation works once, and an answer that is lost cannot be fetched
 again — ask whoever invited you for a new invitation.
 
