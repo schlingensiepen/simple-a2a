@@ -19,7 +19,7 @@ the base address above and `A2A_TOKEN` to your token:
 # Ends as soon as your inbox has a message it did not have at the start,
 # or when its own deadline has passed: A2A_WATCH_MINUTES, 90 unless set.
 # Needs A2A_BASE (the base address) and A2A_TOKEN (your token).
-newest() { curl -sf -H "Authorization: Bearer $A2A_TOKEN" "$A2A_BASE/inbox?limit=1"; }
+newest() { curl -sf --max-time 10 -H "Authorization: Bearer $A2A_TOKEN" "$A2A_BASE/inbox?limit=1"; }
 seen=$(newest) || exit 1
 deadline=$(( $(date +%s) + ${A2A_WATCH_MINUTES:-90} * 60 ))
 while sleep 15; do

@@ -321,3 +321,63 @@ def test_mail_before_the_deadline_still_ends_the_examples_with_the_new_mail_line
             if watcher.poll() is None:
                 watcher.kill()
                 watcher.wait()
+
+
+#: How long one ask of the inbox may take in the examples, in seconds.
+ASK_LIMIT = 10
+
+
+class Stalling:
+    """An inbox that answers the first ask and leaves every later one hanging."""
+
+    def __init__(self) -> None:
+        import http.server
+        import threading
+
+        asked = threading.Event()
+        self.release = threading.Event()
+        release = self.release
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                if asked.is_set():
+                    release.wait(PATIENCE + ASK_LIMIT)
+                    return
+                asked.set()
+                body = b'{"entries": []}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_: object) -> None:
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def stop(self) -> None:
+        self.release.set()
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.mark.parametrize("language", ["sh", "python"])
+def test_an_ask_that_hangs_does_not_carry_the_watcher_past_its_deadline(language: str) -> None:
+    """A stalled ask ends after its own limit, and the deadline still ends the watcher."""
+    if language == "sh" and shutil.which("curl") is None:
+        pytest.skip("the shell example needs curl")
+    stalling = Stalling()
+    try:
+        watcher = watch(blocks(served()[1])[language], language, "t", stalling.base)
+        started = time.monotonic()
+        out, err = watcher.communicate(timeout=DEADLINE + ASK_LIMIT + PATIENCE)
+        took = time.monotonic() - started
+        assert watcher.returncode == 0, err
+        assert DEADLINE_LINE in out
+        assert took <= DEADLINE + ASK_LIMIT + INTERVAL + SLACK, f"took {took:.1f}s"
+    finally:
+        stalling.stop()

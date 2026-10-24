@@ -660,6 +660,8 @@ class Window:
         return Window(offset=0, limit=sys.maxsize)
 
     def over[T](self, items: list[T]) -> list[T]:
+        if self.offset == 0 and self.limit == sys.maxsize:
+            return items
         return items[self.offset : self.offset + self.limit]
 
 
