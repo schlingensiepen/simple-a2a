@@ -98,4 +98,4 @@ def test_a_moment_elsewhere_is_written_in_utc() -> None:
 def test_a_moment_without_a_timezone_is_refused() -> None:
     """Guessing a zone is how a service ends up an hour out for half the year."""
     with pytest.raises(ValueError, match="without a timezone"):
-        clock.to_iso(datetime(2026, 9, 27, 14, 3, 11))  # noqa: DTZ001
+        clock.to_iso(datetime(2026, 9, 27, 14, 3, 11))
