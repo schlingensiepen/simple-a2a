@@ -1,0 +1,32 @@
+# simple-a2a without a proxy: the image with its three ports published directly.
+#
+# The price, stated before anything else: the service speaks plain HTTP and
+# terminates no TLS, so without a proxy in front of it every token — the
+# participants', the observers', and the administration secret — travels in
+# clear text, readable by anything on the way between caller and host. An
+# invitation does as well, and whoever reads one on the way can redeem it first.
+# This is a form for one machine or a network you trust as far as you trust the
+# machine itself, not one for anything others can reach.
+#
+# That is why the ports are published on the loopback address here. Removing the
+# `127.0.0.1:` in front of them exposes the surfaces on every interface, and the
+# paragraph above then applies to the whole network. The base address in the
+# entry pages comes from the Host header the caller sends, and reads `http`,
+# which is now the truth.
+#
+# Replace OWNER with the account the image is published under.
+name: simple-a2a
+
+services:
+  simple-a2a:
+    image: ghcr.io/OWNER/simple-a2a:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8251:8251"
+      - "127.0.0.1:8252:8252"
+      - "127.0.0.1:8253:8253"
+    volumes:
+      - simple-a2a-data:/var/lib/simple-a2a
+
+volumes:
+  simple-a2a-data:

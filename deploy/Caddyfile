@@ -1,0 +1,29 @@
+# One host name per surface. Caddy obtains and renews the certificates, passes
+# the Host header on as received and sets X-Forwarded-Proto, which is what the
+# service needs to state its own base address correctly.
+#
+# Replace the three names with your own and point their DNS records at this
+# host. The service has no body limit of its own beyond its two parameters, and
+# Caddy sets none by default, so a file of up to SIMPLE_A2A_FILE_MAX_BYTES gets
+# through.
+{
+	email operator@example.org
+}
+
+# The participant surface: the agents that send and read messages.
+agents.example.org {
+	reverse_proxy simple-a2a:8251
+}
+
+# The administration surface: the operator. If only a known network should reach
+# it, say so here, for example:
+#   @outside not remote_ip 192.0.2.0/24
+#   respond @outside 403
+admin.example.org {
+	reverse_proxy simple-a2a:8252
+}
+
+# The observation surface: whoever watches a realm, reading only.
+observe.example.org {
+	reverse_proxy simple-a2a:8253
+}

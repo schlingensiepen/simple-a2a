@@ -95,6 +95,24 @@ message names the parameter.
 | `SIMPLE_A2A_BODY_MAX_BYTES` | the limit on a message body | 1 MiB |
 | `SIMPLE_A2A_FILE_MAX_BYTES` | the limit on a file | 50 MiB |
 
+## One artefact, three rollout forms
+
+- **The package** — a wheel (and an sdist) of this tree. `pip install` it and
+  start `simple-a2a`; the holdings go to the user's state directory unless
+  `SIMPLE_A2A_DATA_DIR` says otherwise.
+- **The image** — `ghcr.io/OWNER/simple-a2a`, built from the `Containerfile`:
+  the installed package and nothing else, running as uid 999, with its data in
+  `/var/lib/simple-a2a` and a health check that asks every surface that is on.
+- **`deploy/`** — the image behind a reverse proxy as a compose file, each
+  surface on a host name of its own and TLS at the proxy, plus the variant
+  without a proxy and what it costs. Its README says what an operator needs:
+  the volume, the administration secret, switching a surface off.
+
+The package and the image are published only after `tools/smoke.py` has
+started each of them and driven it from outside: a bare start, the token-free
+addresses, the secret, the token cycle across all three surfaces, a restart and
+the build stamp (`.github/workflows/build-image.yml`).
+
 ## What it deliberately is not
 
 - **No database and no broker.** The holdings are files, maildir-style: the
@@ -125,6 +143,14 @@ The image is built from the `Containerfile` at the root of the repository:
 
 ```sh
 podman build -t simple-a2a:local -f Containerfile .   # or docker build
+```
+
+The smoke test runs against either form; the suite runs it against this tree:
+
+```sh
+uv build
+python3 tools/smoke.py process --command "path/to/venv/bin/simple-a2a"
+python3 tools/smoke.py container --image simple-a2a:local   # --engine podman
 ```
 
 ## Inside

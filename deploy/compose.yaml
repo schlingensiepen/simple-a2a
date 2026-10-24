@@ -1,0 +1,63 @@
+# simple-a2a behind a reverse proxy: the image, its data volume, and Caddy in
+# front of it, each surface on a host name of its own.
+#
+# The service terminates no TLS and holds no certificate. It speaks plain HTTP
+# on its three ports inside the compose network, publishes none of them, and the
+# proxy is the only thing anybody outside reaches. The proxy terminates TLS,
+# passes the Host header on unchanged and sets X-Forwarded-Proto — which is how
+# the service learns the base address it puts into every entry page and every
+# skill package. Without that header those documents say `http` even where only
+# `https` answers.
+#
+# Replace OWNER with the account the image is published under, the three host
+# names in the Caddyfile with your own, and the address in its first block with
+# one that receives certificate notices. Nothing else has to be set: a bare start
+# works, and generates the administration secret (see README.md).
+name: simple-a2a
+
+services:
+  simple-a2a:
+    image: ghcr.io/OWNER/simple-a2a:latest
+    restart: unless-stopped
+    # No ports: the proxy reaches the surfaces over the compose network, and
+    # nothing else should. The image binds 0.0.0.0 inside the container, which
+    # is the boundary here.
+    volumes:
+      - simple-a2a-data:/var/lib/simple-a2a
+    # Every operational parameter has a usable default; set only what you mean
+    # to change. For example:
+    #
+    # environment:
+    #   # Switch the observation surface off. An empty port variable is the one
+    #   # way to do that, and the image's health check follows the configuration.
+    #   # Remove its block from the Caddyfile as well.
+    #   SIMPLE_A2A_OBSERVER_PORT: ""
+    #   # Raise the limit on a file: bytes, no unit; the default is 50 MiB.
+    #   SIMPLE_A2A_FILE_MAX_BYTES: "104857600"
+    #
+    # Give the administration secret yourself instead of having one generated:
+    # SIMPLE_A2A_ADMIN_SECRET=<at least 32 characters> in a file beside this one
+    # that is not under version control — never inline here.
+    #
+    # env_file: [secrets.env]
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - simple-a2a
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  # The holdings and the administration secret. Owned by uid 999 inside the
+  # image; a named volume takes that ownership from the image on first use.
+  simple-a2a-data:
+  caddy-data:
+  caddy-config:
