@@ -758,6 +758,7 @@ def test_with_only_an_invitation_it_starts_and_redeeming_works(
 
     said = bare.initialize()["result"]["instructions"]
     refused = bare.call("inbox")
+    waited = bare.call("wait_for_mail")
     redeemed = bare.call("redeem", invitation=voucher)
     token = json.loads(text_of(redeemed))["token"]
     me = bare.call("me")
@@ -766,7 +767,11 @@ def test_with_only_an_invitation_it_starts_and_redeeming_works(
     again = second.call("me")
 
     assert said.startswith("This MCP server is not the contract.")
-    assert "no identity here yet" in said and "`redeem`" in said
+    assert "no identity in this server yet" in said and "`redeem`" in said
+    assert "invitation you have not used yet" in said
+    assert "`add_identity`" in said, "an identity redeemed elsewhere is added, not redeemed"
+    assert waited["isError"] is True and "no inbox to wait on" in text_of(waited)
+    assert "`redeem`" in text_of(waited) and "`add_identity`" in text_of(waited)
     assert refused["isError"] is True and "type: no-token" in text_of(refused)
     assert identity_of(refused).startswith("identity: none")
     assert redeemed["isError"] is False

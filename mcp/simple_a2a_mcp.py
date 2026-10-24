@@ -1771,12 +1771,14 @@ class Server:
         )
         if not self.identities:
             who = (
-                f"There is no identity here yet, so only redeeming will work: call "
-                f"`{self.redeem}` with the invitation you were given, and a `label` for it if "
-                f"you like. The identity it creates is added to this server at once, and its "
-                f"token is in that one answer — shown once, because that is the one moment it "
-                f"exists, so keep it where you keep secrets. Until then every other tool is "
-                f"refused by the service with `no-token`."
+                f"There is no identity in this server yet. If you hold an invitation you have "
+                f"not used yet, call `{self.redeem}` with it, and a `label` for it if you like. "
+                f"The identity it creates is added to this server at once, and its token is in "
+                f"that one answer — shown once, because that is the one moment it exists, so "
+                f"keep it where you keep secrets. If you already hold a token — because you "
+                f"redeemed the invitation some other way — call `add_identity` with it instead: "
+                f"an invitation works once, so redeeming it again is refused. Until then every "
+                f"other tool is refused by the service with `no-token`."
             )
         else:
             listed = ", ".join(
@@ -2074,7 +2076,10 @@ class Server:
             watch.farewell()
         self.resources_changed()
         if not self.identities:
-            now = "No identity is left: only redeeming will work until one is added."
+            now = (
+                "No identity is left: redeem an invitation you have not used yet, or add an "
+                "identity you hold with `add_identity`."
+            )
         elif len(self.identities) == 1:
             now = (
                 f"One identity is left, {self.identities[0].label}: calls without `identity` "
@@ -2158,8 +2163,9 @@ class Server:
             return refused
         if identity is None:
             return _text_result(
-                f"There is no identity here yet, so there is no inbox to wait on. Redeem your "
-                f"invitation with `{self.redeem}` first.",
+                f"There is no identity in this server yet, so there is no inbox to wait on. "
+                f"Redeem an invitation you have not used yet with `{self.redeem}`, or add the "
+                f"identity you already hold with `add_identity`, first.",
                 error=True,
             )
         lookout = self.lookouts[identity.label.lower()]
@@ -2423,7 +2429,7 @@ def main(arguments: list[str] | None = None) -> int:
     who = (
         f"identities {server.labels()}"
         if server.identities
-        else "no identity yet — only redeeming will work"
+        else "no identity yet — redeem an unused invitation or use add_identity"
     )
     answers = {
         "both": "initialize and server/discover",

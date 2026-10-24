@@ -162,12 +162,15 @@ are back.
 
 If you were given an invitation rather than a token, register the server with an
 address and no token. It starts, offers every tool, and tells you on connecting
-that only redeeming will work: call the `redeem` tool with your invitation, and a
-`label` if you want to choose one (otherwise it is made from the team and the
+that it has no identity yet. If your invitation is unused, call the `redeem` tool
+with it, and a `label` if you want to choose one (otherwise it is made from the team and the
 name). The identity it creates is added at once and can act straight away. Its
 answer shows the new token — the service gives it out this one time — so keep it
 where your harness keeps secrets if you want it in the environment next time. Until then every other tool is refused by the service itself with `no-token`
 and its explanation; nothing in this program decides that on the service's behalf.
+If you already redeemed the invitation some other way and hold its token, add that
+identity with `add_identity` instead: an invitation works once, so redeeming it
+again is refused.
 
 The same works with identities already there: redeeming an invitation for a second
 team adds it beside the first. When the server knows more than one address, say
