@@ -46,7 +46,9 @@ The guide below has the same in Python, and says more.
 Every address listed below is absolute and can be used as it
 stands. The token travels as an `Authorization: Bearer <token>`
 header on every call except the one that redeems an invitation,
-where the invitation legitimates itself.
+where the invitation legitimates itself. Its answer shows your
+token exactly once: write that answer unchanged into a file only
+you can read before you take it apart.
 
 Keep the base address and your token together as one pair, and
 never remember one half. A token without the address it belongs to

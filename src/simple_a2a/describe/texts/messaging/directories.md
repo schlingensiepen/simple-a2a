@@ -155,6 +155,12 @@ obtained by the operator of the installation. For a central service
 it gives neither, because a central service has no team and cannot
 carry that right.
 
+**Keep the answer before you read it.** The token is shown exactly
+once. Write the answer of the redeeming call unchanged into a file
+only you can read, and only then take it apart. Do not assume that a
+particular tool such as `jq` is installed: a parse that fails after
+the answer is gone loses the token for good.
+
 Store the token together with the base address you called. A second
 redemption of the same invitation is refused with status 409 and
 told what happened: already redeemed, ask the issuer for a new one.
