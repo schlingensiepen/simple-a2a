@@ -88,6 +88,25 @@ class Register:
         ]
 
 
+def unknown_field(path: str, owner: str, fields: list[str]) -> str:
+    """What a field the request does not have teaches, at whatever operation.
+
+    The one `invalid-input` text that is not written per operation, because what
+    it has to say is the same everywhere and comes from the request's own shape:
+    this name is not one of its fields, and these are. The operation's own text
+    explains how its fields fit together, which is the wrong lesson for somebody
+    who used a name the request does not have — `to` where it says `recipients` —
+    and it sent them looking in the wrong place.
+
+    `owner` is the path of the object the name was found in, empty for the
+    request itself, and `fields` are that object's fields as the model has them.
+    """
+    listed = ", ".join(f"`{name}`" for name in fields)
+    if owner:
+        return f"`{path}` is not a field of this request. The fields of `{owner}` are {listed}."
+    return f"`{path}` is not a field of this request. Its fields are {listed}."
+
+
 #: The types every operation behind a token can produce, whatever else it does.
 #: Listed once rather than repeated per operation, because repeating them is how
 #: one of them goes missing somewhere.

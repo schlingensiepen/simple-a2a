@@ -20,12 +20,14 @@ import logging
 import math
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Annotated, Any
+from dataclasses import replace
+from typing import Annotated, Any, get_args
 
 from fastapi import APIRouter, FastAPI, Header, Path, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.routing import APIRoute
+from pydantic import BaseModel
 from starlette.routing import Match
 
 from simple_a2a.core.base_address import base_address
@@ -33,7 +35,7 @@ from simple_a2a.core.clock import now_iso
 from simple_a2a.describe import mcp_package, package
 from simple_a2a.describe.guide import GUIDE, Guide
 from simple_a2a.describe.rejections import Rejection, Type
-from simple_a2a.describe.teaching import Register
+from simple_a2a.describe.teaching import Register, unknown_field
 from simple_a2a.domain import refusals
 
 logger = logging.getLogger("simple_a2a")
@@ -302,11 +304,19 @@ def install_handlers(
         operation_id = (
             f"{request.method} {getattr(route, 'path_format', route.path)}" if route else ""
         )
-        field = _first_field(exc)
+        # A name the request does not have is answered before anything else that
+        # did not fit: it is usually the cause of the rest — `to` sent for
+        # `recipient` is an unknown field and a missing one — and the operation's
+        # own text, about how its fields fit together, would send the reader to
+        # the wrong place.
+        unknown = _unknown_field(exc, route)
+        field = unknown[0] if unknown else _first_field(exc)
         try:
             rejection = register.rejection(
                 operation_id, refusals.InvalidInput(field or "body", reason="does not fit")
             )
+            if unknown:
+                rejection = replace(rejection, message=unknown[1])
         except KeyError:
             # No text for this operation and type: that is a build error rather than
             # a caller's problem, so it is answered as ours.
@@ -350,6 +360,64 @@ def _first_field(exc: RequestValidationError) -> str | None:
         if location:
             return ".".join(location)
     return None
+
+
+def _unknown_field(exc: RequestValidationError, route: Any) -> tuple[str, str] | None:
+    """The first name in the body that its object does not have, and what it teaches.
+
+    The path is written the way `field` always is — `attachments.0.size` — and the
+    fields listed are those of the object the name was found in, read from the
+    route's own request model, so the list cannot drift from what is accepted.
+    Nothing is answered here for a name whose object cannot be found in the model;
+    that case keeps the operation's own text.
+    """
+    model = _model_in(getattr(getattr(route, "body_field", None), "field_info", None))
+    if model is None:
+        return None
+    for error in exc.errors():
+        location = list(error.get("loc", ()))
+        if error.get("type") != "extra_forbidden" or location[:1] != ["body"]:
+            continue
+        parts = location[1:]
+        owner = _model_at(model, parts[:-1])
+        if not parts or owner is None:
+            continue
+        path = ".".join(str(part) for part in parts)
+        within = ".".join(str(part) for part in parts[:-1])
+        return path, unknown_field(path, within, _field_names(owner))
+    return None
+
+
+def _field_names(model: type[BaseModel]) -> list[str]:
+    """The fields of a request object, as a caller writes them, in the model's order."""
+    return [info.alias or name for name, info in model.model_fields.items()]
+
+
+def _model_in(found: Any) -> type[BaseModel] | None:
+    """The model a field holds, through `None`, lists and the field's own wrapper."""
+    annotation = getattr(found, "annotation", found)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    for argument in get_args(annotation):
+        model = _model_in(argument)
+        if model is not None:
+            return model
+    return None
+
+
+def _model_at(model: type[BaseModel], parts: list[Any]) -> type[BaseModel] | None:
+    """The model of the object at `parts` inside `model`; a list index stays in place."""
+    current: type[BaseModel] | None = model
+    for part in parts:
+        if isinstance(part, int):
+            continue
+        fields = {info.alias or name: info for name, info in current.model_fields.items()}
+        if part not in fields:
+            return None
+        current = _model_in(fields[part])
+        if current is None:
+            return None
+    return current
 
 
 def _pruned(document: dict[str, Any]) -> dict[str, Any]:

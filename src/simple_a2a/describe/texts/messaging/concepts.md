@@ -173,7 +173,7 @@ limit 413, and a fault of ours 500.
 | `wrong-verb` | 405 | the address exists, but not with this verb |
 | `invitation-used` | 409 | the invitation was already redeemed |
 | `name-taken` | 409 | the name is already taken |
-| `invalid-input` | 400 | a field is missing or has the wrong shape |
+| `invalid-input` | 400 | a field is missing, unknown, or has the wrong shape |
 | `too-large` | 413 | a limit is exceeded |
 | `internal-error` | 500 | a fault of ours; the call may be repeated |
 
@@ -185,7 +185,8 @@ but reached nobody.
 
 Every refusal names a way that you can actually walk. A refusal
 about a field names the field, the right shape and an example; one
-about a limit names the limit. If a token that worked stops
+about a field the request does not have names it and lists the
+fields the request has; one about a limit names the limit. If a token that worked stops
 working, it was revoked — and a revocation often means somebody
 suspected a leak. Then the way back is a new invitation under a new
 name, because there is no replacement for a lost token. Do not
