@@ -131,17 +131,13 @@ def test_a_field_the_request_does_not_have_is_named_with_the_fields_it_has(
             assert listed_fields(body["message"]) == list(model.model_fields), path
             covered.append(f"{method} {path}")
 
-    assert len(covered) == 7, covered
+    assert len(covered) == 11, covered
 
 
-def test_where_an_unknown_field_is_ignored_rather_than_refused(
+def test_no_operation_with_a_json_body_ignores_an_unknown_field(
     admin: TestClient, participants: TestClient, observation: TestClient
 ) -> None:
-    """Not a promise: the operations that still drop a field they do not know.
-
-    Pinned so that the list cannot grow unnoticed, and so that whoever makes these
-    refuse as well finds the place that has to change with them.
-    """
+    """Read from the routes, so a new operation with a body cannot slip past."""
     ignoring = [
         f"{method} {path}"
         for client in (admin, participants, observation)
@@ -149,12 +145,7 @@ def test_where_an_unknown_field_is_ignored_rather_than_refused(
         if model.model_config.get("extra") != "forbid"
     ]
 
-    assert ignoring == [
-        "POST /realms",
-        "POST /realms/{realm}/teams",
-        "POST /realms/{realm}/teams/{team}/invitations",
-        "POST /realms/{realm}/observer-tokens",
-    ]
+    assert ignoring == []
 
 
 def test_to_instead_of_recipients_says_so_rather_than_explaining_the_body(

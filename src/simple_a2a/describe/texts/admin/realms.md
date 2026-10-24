@@ -145,7 +145,8 @@ be resolved, 401; a revoked token, 401; a token of the wrong kind,
 403; an unknown realm, team or name in the address, 404; an unknown
 address, 404; a wrong verb on a known address, 405; a name
 collision, 409; a missing or malformed field, 400, naming the field,
-the right shape and an example; an exceeded limit, 413, naming the
+the right shape and an example; a field the request does not have,
+400, naming it and listing the fields the request has; an exceeded limit, 413, naming the
 limit; and a fault of ours, 500, on which the call may simply be
 repeated.
 
@@ -158,7 +159,7 @@ repeated.
 | `unknown-address` | 404 | no such address on this surface |
 | `wrong-verb` | 405 | the address exists, but not with this verb |
 | `name-taken` | 409 | the name is already taken |
-| `invalid-input` | 400 | a field is missing or has the wrong shape |
+| `invalid-input` | 400 | a field is missing, unknown, or has the wrong shape |
 | `too-large` | 413 | a limit is exceeded |
 | `internal-error` | 500 | a fault of ours; the call may be repeated |
 

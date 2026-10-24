@@ -12,10 +12,21 @@ where typos live.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class RealmIn(BaseModel):
+class Input(BaseModel):
+    """The base of everything the operator sends, configured as on the participant surface.
+
+    An unknown field is **refused**, not ignored: a field we do not know means the
+    caller has misunderstood something, and a request that succeeds without it hides
+    that. The refusal names the field and lists the ones the request has.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RealmIn(Input):
     realm_name: str = Field(
         description="The name of the realm to create. Unique across the installation.",
         examples=["household"],
@@ -47,7 +58,7 @@ class RealmList(BaseModel):
     )
 
 
-class TeamIn(BaseModel):
+class TeamIn(Input):
     team_name: str = Field(
         description="The name of the team to create. Unique within the realm.",
         examples=["kitchen"],
@@ -118,7 +129,7 @@ class ServiceList(BaseModel):
     )
 
 
-class InvitationIn(BaseModel):
+class InvitationIn(Input):
     member_name: str = Field(
         description="Who the identity will be once the invitation is redeemed. Fixed here, "
         "because you have to name somebody to give them a mission. Checked again at "
@@ -226,7 +237,7 @@ class InvitationList(BaseModel):
     )
 
 
-class ObserverIn(BaseModel):
+class ObserverIn(Input):
     display_name: str = Field(
         description="How you will refer to this observer token. Listing and revoking go by "
         "it, never by the secret. Unique among observer tokens within the realm.",

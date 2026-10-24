@@ -186,7 +186,11 @@ def test_a_body_that_does_not_fit_at_all_is_still_our_own_rejection(admin: TestC
 
     assert answer.status_code == 400
     assert answer.json()["type"] == "invalid-input"
-    assert answer.json()["field"] == "realm_name"
+    # The unknown name is answered before the missing one it stands for.
+    assert answer.json()["field"] == "nonsense"
+    assert answer.json()["message"] == (
+        "`nonsense` is not a field of this request. Its fields are `realm_name`."
+    )
 
 
 def test_the_realm_listing_counts_what_is_in_each(admin: TestClient) -> None:
