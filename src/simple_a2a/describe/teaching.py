@@ -88,7 +88,7 @@ class Register:
         ]
 
 
-def unknown_field(path: str, owner: str, fields: list[str]) -> str:
+def unknown_field(path: str | None, owner: str, fields: list[str]) -> str:
     """What a field the request does not have teaches, at whatever operation.
 
     The one `invalid-input` text that is not written per operation, because what
@@ -100,8 +100,19 @@ def unknown_field(path: str, owner: str, fields: list[str]) -> str:
 
     `owner` is the path of the object the name was found in, empty for the
     request itself, and `fields` are that object's fields as the model has them.
+    `path` is `None` for a name that is not repeated back — one that is not a short
+    plain name — so the sentence says what was wrong without quoting it.
     """
     listed = ", ".join(f"`{name}`" for name in fields)
+    if path is None:
+        found = f"`{owner}`" if owner else "this request"
+        lead = (
+            f"A name in {found} is not a field of this request. It is not repeated "
+            "here, since it is not a short plain name of letters, digits, `_` and `-`."
+        )
+        if owner:
+            return f"{lead} The fields of `{owner}` are {listed}."
+        return f"{lead} Its fields are {listed}."
     if owner:
         return f"`{path}` is not a field of this request. The fields of `{owner}` are {listed}."
     return f"`{path}` is not a field of this request. Its fields are {listed}."

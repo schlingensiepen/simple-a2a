@@ -158,7 +158,8 @@ missing or unresolvable token 401, revoked token 401, a token of
 the wrong kind for the operation 403, missing realm master right
 403, unknown name 404, unknown id 404, unknown address 404, wrong
 verb for a known address 405, an invitation already redeemed 409, a
-name collision 409, a malformed or missing field 400, an exceeded
+name collision 409, a field that is missing, unknown, or has the
+wrong shape 400, an exceeded
 limit 413, and a fault of ours 500.
 
 | Type | Status | Means |
@@ -186,8 +187,9 @@ but reached nobody.
 Every refusal names a way that you can actually walk. A refusal
 about a field names the field, the right shape and an example; one
 about a field the request does not have names it and lists the
-fields the request has; one about a limit names the limit. If a token that worked stops
-working, it was revoked — and a revocation often means somebody
+fields of the object it was found in — the request's own, or those
+of a nested object such as an attachment entry; one about a limit
+names the limit. If a token that worked stops working, it was revoked — and a revocation often means somebody
 suspected a leak. Then the way back is a new invitation under a new
 name, because there is no replacement for a lost token. Do not
 retry a refused call with a different secret and do not go looking

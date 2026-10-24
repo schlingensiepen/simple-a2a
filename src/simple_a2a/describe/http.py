@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -382,10 +383,33 @@ def _unknown_field(exc: RequestValidationError, route: Any) -> tuple[str, str] |
         owner = _model_at(model, parts[:-1])
         if not parts or owner is None:
             continue
-        path = ".".join(str(part) for part in parts)
         within = ".".join(str(part) for part in parts[:-1])
-        return path, unknown_field(path, within, _field_names(owner))
+        if _plain(parts):
+            path = ".".join(str(part) for part in parts)
+            return path, unknown_field(path, within, _field_names(owner))
+        # The name is the caller's own input, of any length and with any character
+        # in it — a backtick, a line break, a dot that reads as a path. It is not
+        # repeated, neither in the sentence nor in `field`; the object it was found
+        # in is ours to name, and the request itself is named `body`, as wherever
+        # a refusal has no single field.
+        return within or "body", unknown_field(None, within, _field_names(owner))
     return None
+
+
+#: What a name must look like to be repeated back: short and plain, so that it
+#: cannot break out of the quotes around it, read as a path, or fill the answer.
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_PLAIN_PATH_MAX = 200
+
+
+def _plain(parts: list[Any]) -> bool:
+    """Whether every part of a path can be repeated to the caller as it came."""
+    for part in parts:
+        if isinstance(part, int) and not isinstance(part, bool):
+            continue
+        if not isinstance(part, str) or _PLAIN_NAME.fullmatch(part) is None:
+            return False
+    return len(".".join(str(part) for part in parts)) <= _PLAIN_PATH_MAX
 
 
 def _field_names(model: type[BaseModel]) -> list[str]:
@@ -393,6 +417,7 @@ def _field_names(model: type[BaseModel]) -> list[str]:
     return [info.alias or name for name, info in model.model_fields.items()]
 
 
+# Reads list/Optional of one model only; test_request_bodies_have_the_shape_read_here pins it.
 def _model_in(found: Any) -> type[BaseModel] | None:
     """The model a field holds, through `None`, lists and the field's own wrapper."""
     annotation = getattr(found, "annotation", found)
@@ -405,6 +430,7 @@ def _model_in(found: Any) -> type[BaseModel] | None:
     return None
 
 
+# Steps through model fields and list indexes only; test_request_bodies_have_the_shape_read_here.
 def _model_at(model: type[BaseModel], parts: list[Any]) -> type[BaseModel] | None:
     """The model of the object at `parts` inside `model`; a list index stays in place."""
     current: type[BaseModel] | None = model

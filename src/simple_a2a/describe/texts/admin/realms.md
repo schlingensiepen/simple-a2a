@@ -146,9 +146,9 @@ be resolved, 401; a revoked token, 401; a token of the wrong kind,
 address, 404; a wrong verb on a known address, 405; a name
 collision, 409; a missing or malformed field, 400, naming the field,
 the right shape and an example; a field the request does not have,
-400, naming it and listing the fields the request has; an exceeded limit, 413, naming the
-limit; and a fault of ours, 500, on which the call may simply be
-repeated.
+400, naming it and listing the fields the request has; an exceeded
+limit, 413, naming the limit; and a fault of ours, 500, on which the
+call may simply be repeated.
 
 | Type | Status | Means |
 |---|---|---|

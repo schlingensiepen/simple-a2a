@@ -8,6 +8,7 @@ the names in the code, and those are unique only because nobody has repeated one
 from __future__ import annotations
 
 import re
+from typing import Any, get_args, get_origin
 
 import pytest
 from conftest import bearer
@@ -17,7 +18,7 @@ from pydantic import BaseModel
 
 from simple_a2a.describe.rejections import Type
 from simple_a2a.messaging import texts as messaging_texts
-from simple_a2a.messaging.models import AttachmentIn
+from simple_a2a.messaging.models import AttachmentIn, SendToPeers
 
 
 @pytest.mark.parametrize("surface", ["participants", "no_token", "observation"])
@@ -62,6 +63,29 @@ def body_routes(client: TestClient) -> list[tuple[str, str, type[BaseModel]]]:
             assert isinstance(model, type) and issubclass(model, BaseModel), route.path_format
             for method in sorted(route.methods):
                 found.append((method, route.path_format, model))
+    return found
+
+
+def written(model: type[BaseModel]) -> list[str]:
+    """The fields of a model as a caller writes them — the rule the answer uses."""
+    return [info.alias or name for name, info in model.model_fields.items()]
+
+
+def models_in(annotation: Any) -> list[type[BaseModel]]:
+    """Every model an annotation holds, through lists, `None` and unions."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return [annotation]
+    return [model for argument in get_args(annotation) for model in models_in(argument)]
+
+
+def nested(model: type[BaseModel]) -> list[type[BaseModel]]:
+    """A model and every model inside it, each once."""
+    found = [model]
+    for current in found:
+        for info in current.model_fields.values():
+            for inner in models_in(info.annotation):
+                if inner not in found:
+                    found.append(inner)
     return found
 
 
@@ -112,8 +136,6 @@ def test_a_field_the_request_does_not_have_is_named_with_the_fields_it_has(
         ("observe", observation),
     ):
         for method, path, model in body_routes(client):
-            if model.model_config.get("extra") != "forbid":
-                continue
             headers = {}
             if surface == "messaging" and path != "/invitations/redeem":
                 headers = callers["service" if path.startswith("/aliases/") else "peer"]
@@ -128,7 +150,7 @@ def test_a_field_the_request_does_not_have_is_named_with_the_fields_it_has(
             assert body["message"].startswith("`no_such_field` is not a field of this request."), (
                 path
             )
-            assert listed_fields(body["message"]) == list(model.model_fields), path
+            assert listed_fields(body["message"]) == written(model), path
             covered.append(f"{method} {path}")
 
     assert len(covered) == 11, covered
@@ -139,13 +161,116 @@ def test_no_operation_with_a_json_body_ignores_an_unknown_field(
 ) -> None:
     """Read from the routes, so a new operation with a body cannot slip past."""
     ignoring = [
-        f"{method} {path}"
+        f"{method} {path}: {inner.__name__}"
         for client in (admin, participants, observation)
         for method, path, model in body_routes(client)
-        if model.model_config.get("extra") != "forbid"
+        for inner in nested(model)
+        if inner.model_config.get("extra") != "forbid"
     ]
 
     assert ignoring == []
+
+
+def test_request_bodies_have_the_shape_read_here(
+    admin: TestClient, participants: TestClient, observation: TestClient
+) -> None:
+    """The unknown-field answer finds its object through lists and `None` only.
+
+    It reads one body parameter holding one model, steps by field name or list
+    index, and lists `alias or name`. A second body parameter, a union of models,
+    a dict of models or a `validation_alias` would make it list the wrong fields
+    or none; this test is red before that happens, not after.
+    """
+    wrong = []
+    for client in (admin, participants, observation):
+        for route in client.app.routes:
+            if not isinstance(route, APIRoute) or route.body_field is None:
+                continue
+            where = route.path_format
+            if len(route.dependant.body_params) != 1:
+                wrong.append(f"{where}: {len(route.dependant.body_params)} body parameters")
+            held = models_in(route.body_field.field_info.annotation)
+            if len(held) != 1:
+                wrong.append(f"{where}: body holds {held}")
+                continue
+            for model in nested(held[0]):
+                for name, info in model.model_fields.items():
+                    if info.validation_alias is not None:
+                        wrong.append(f"{where}: {model.__name__}.{name} has validation_alias")
+                    if len(models_in(info.annotation)) > 1:
+                        wrong.append(f"{where}: {model.__name__}.{name} is a union of models")
+                    if dict_of_model(info.annotation):
+                        wrong.append(f"{where}: {model.__name__}.{name} is a dict of models")
+
+    assert wrong == []
+
+
+def dict_of_model(annotation: Any) -> bool:
+    if get_origin(annotation) is dict:
+        return bool(models_in(annotation))
+    return any(dict_of_model(argument) for argument in get_args(annotation))
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["a`b", "a\nb", "a\x07b", "x" * 10_000, "a.b", "ä", ""],
+    ids=["backtick", "newline", "control", "long", "dotted", "non-ascii", "empty"],
+)
+def test_a_name_that_is_not_plain_is_not_repeated(
+    name: str, participants: TestClient, callers: dict[str, dict[str, str]]
+) -> None:
+    """The name is the caller's input: quoted back only when it is short and plain."""
+    answer = participants.post(
+        "/peers/messages",
+        json={"subject": "s", "body": "b", name: True},
+        headers=callers["peer"],
+    )
+
+    assert answer.status_code == 400
+    body = answer.json()
+    assert body["type"] == "invalid-input"
+    assert body["field"] == "body"
+    assert not name or name not in body["message"]
+    assert "\n" not in body["message"] and "\x07" not in body["message"]
+    assert body["message"].startswith("A name in this request is not a field of this request.")
+    assert listed_fields(body["message"]) == written(SendToPeers)
+    assert len(answer.content) < 1000
+
+
+def test_a_name_that_is_not_plain_inside_an_entry_names_only_the_entry(
+    participants: TestClient, callers: dict[str, dict[str, str]]
+) -> None:
+    answer = participants.post(
+        "/peers/messages",
+        json={
+            "subject": "s",
+            "body": "b",
+            "attachments": [{"name": "x", "file_id": "f", "a`b\nc": 1}],
+        },
+        headers=callers["peer"],
+    )
+
+    assert answer.status_code == 400
+    body = answer.json()
+    assert body["type"] == "invalid-input"
+    assert body["field"] == "attachments.0"
+    assert "a`b" not in body["message"] and "\n" not in body["message"]
+    assert body["message"].startswith("A name in `attachments.0` is not a field of this request.")
+    assert listed_fields(body["message"], "attachments.0") == written(AttachmentIn)
+
+
+def test_a_plain_name_at_the_length_limit_is_still_repeated(
+    participants: TestClient, callers: dict[str, dict[str, str]]
+) -> None:
+    name = "n" * 64
+    answer = participants.post(
+        "/peers/messages",
+        json={"subject": "s", "body": "b", name: True},
+        headers=callers["peer"],
+    )
+
+    assert answer.json()["field"] == name
+    assert answer.json()["message"].startswith(f"`{name}` is not a field of this request.")
 
 
 def test_to_instead_of_recipients_says_so_rather_than_explaining_the_body(
@@ -200,7 +325,7 @@ def test_an_unknown_field_inside_an_entry_is_named_by_its_path(
     body = answer.json()
     assert body["field"] == "attachments.1.size"
     assert body["message"].startswith("`attachments.1.size` is not a field of this request.")
-    assert listed_fields(body["message"], "attachments.1") == list(AttachmentIn.model_fields)
+    assert listed_fields(body["message"], "attachments.1") == written(AttachmentIn)
 
 
 def test_every_other_input_error_keeps_the_operation_s_own_text(

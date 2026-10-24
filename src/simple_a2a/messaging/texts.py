@@ -252,9 +252,9 @@ def build() -> Register:
     register.teach(
         "POST /aliases/{alias}/messages",
         Type.INVALID_INPUT,
-        "There is no recipient field here: the alias in the address is the recipient, and we "
-        "set `in_reply_to` for you to the message it belongs to. Exactly one of `body` and "
-        "`body_file_id` is filled.",
+        "Exactly one of `body` and `body_file_id` is filled, and each attachment entry has "
+        "exactly one of `file_id` and `message_id`. An attachment name is not a path and "
+        "carries no control characters.",
     )
 
     # -- receiving ---------------------------------------------------------

@@ -768,9 +768,10 @@ def _write_self_image(context: Context, caller: Caller, text: str) -> int:
 def _attachments(entries: list[models.AttachmentIn] | None) -> list[dict[str, Any]] | None:
     """Back to plain dictionaries, with absent fields absent.
 
-    The operations check the shape themselves — exactly one identifier, no `size`
-    sent in — and they have to see what the caller sent rather than a model's
-    defaults filled in around it.
+    The operations check the shape themselves — exactly one identifier — and they
+    have to see what the caller sent rather than a model's defaults filled in
+    around it. A `size` sent in never gets here: the model refuses it as a field
+    the request does not have.
     """
     if entries is None:
         return None
