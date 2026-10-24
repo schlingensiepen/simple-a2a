@@ -12,6 +12,10 @@ Each example also has a deadline of its own, because a harness may end a backgro
 command after a while, and a watcher ended without a word looks like an empty inbox.
 It ends with a line of its own once the deadline has passed, and not before.
 
+An agent that restarts the watcher after reading can hand it the newest message it
+read as `A2A_SEEN`, so that what arrived between reading and restarting is not taken
+for old: then the watcher ends at once, and with the newest one it waits as before.
+
 The one change made to them is the interval, from the recommended fifteen seconds to
 one, so that the test does not take minutes — and, where the deadline is under test,
 its unit, from minutes to seconds.
@@ -251,9 +255,18 @@ def test_a_wrong_token_ends_the_watcher_at_once_instead_of_waking_later(
 
 
 def watch(
-    code: str, language: str, token: str, base: str, deadline: float = DEADLINE
+    code: str,
+    language: str,
+    token: str,
+    base: str,
+    deadline: float = DEADLINE,
+    seen: str | None = None,
 ) -> subprocess.Popen[bytes]:
-    """The example with `A2A_WATCH_MINUTES` read as seconds and set to `deadline`."""
+    """The example with `A2A_WATCH_MINUTES` read as seconds and set to `deadline`.
+
+    With `seen`, `A2A_SEEN` is set to it: the newest message the agent has read.
+    """
+    extra = {} if seen is None else {"A2A_SEEN": seen}
     return subprocess.Popen(
         runnable(code, language, deadline_in_seconds=True),
         env={
@@ -261,6 +274,7 @@ def watch(
             "A2A_BASE": base,
             "A2A_TOKEN": token,
             "A2A_WATCH_MINUTES": f"{deadline:g}",
+            **extra,
         },
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -321,6 +335,94 @@ def test_mail_before_the_deadline_still_ends_the_examples_with_the_new_mail_line
             if watcher.poll() is None:
                 watcher.kill()
                 watcher.wait()
+
+
+def newest_id(instance: Instance, token: str) -> str:
+    """The message_id of the newest message in the inbox, as an agent reads it."""
+    return http("GET", f"{instance.base}/inbox?limit=1", token=token)["entries"][0]["message_id"]
+
+
+def ended(
+    watchers: list[tuple[str, subprocess.Popen[bytes]]],
+) -> Iterator[tuple[str, bytes, bytes, int]]:
+    """Each watcher's language, output, errors and exit code, once it has ended."""
+    try:
+        for language, watcher in watchers:
+            out, err = watcher.communicate(timeout=PATIENCE)
+            yield language, out, err, watcher.returncode
+    finally:
+        for _, watcher in watchers:
+            if watcher.poll() is None:
+                watcher.kill()
+                watcher.wait()
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_a_seen_id_that_is_the_newest_keeps_the_examples_waiting_until_their_deadline(
+    instance: Instance,
+) -> None:
+    """`A2A_SEEN` equal to the newest message: nothing is new, the deadline ends them."""
+    sender, fritz = instance.member("Karl"), instance.member("Fritz")
+    instance.send(sender, "Fritz", "read already")
+    seen = newest_id(instance, fritz)
+    watchers = [
+        (language, watch(code, language, fritz, instance.base, seen=seen))
+        for language, code in blocks(served()[1]).items()
+    ]
+    started = time.monotonic()
+    time.sleep(DEADLINE - INTERVAL - 0.5)
+    for language, watcher in watchers:
+        assert watcher.poll() is None, f"{language} ended with nothing new"
+    for language, out, err, code in ended(watchers):
+        took = time.monotonic() - started
+        assert code == 0, (language, err)
+        assert DEADLINE_LINE in out, language
+        assert b"New mail" not in out, language
+        assert took <= DEADLINE + INTERVAL + SLACK, f"{language} took {took:.1f}s"
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+def test_mail_that_arrived_before_the_restart_ends_the_examples_at_once(
+    instance: Instance,
+) -> None:
+    """`A2A_SEEN` older than the newest message: what arrived in between wakes at once."""
+    sender, gerda = instance.member("Ludwig"), instance.member("Gerda")
+    instance.send(sender, "Gerda", "read already")
+    seen = newest_id(instance, gerda)
+    instance.send(sender, "Gerda", "arrived between reading and the restart")
+    started = time.monotonic()
+    watchers = [
+        (language, watch(code, language, gerda, instance.base, deadline=PATIENCE, seen=seen))
+        for language, code in blocks(served()[1]).items()
+    ]
+    for language, out, err, code in ended(watchers):
+        took = time.monotonic() - started
+        assert code == 0, (language, err)
+        assert b"New mail" in out, language
+        assert DEADLINE_LINE not in out, language
+        assert took < INTERVAL + SLACK, f"{language} took {took:.1f}s, it slept first"
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
+@pytest.mark.parametrize("seen", [None, ""], ids=["unset", "empty"])
+def test_an_empty_inbox_keeps_the_examples_waiting_and_the_first_mail_ends_them(
+    instance: Instance, seen: str | None
+) -> None:
+    """No message yet: no id to compare is not taken for new mail, the first one is."""
+    suffix = "Unset" if seen is None else "Empty"
+    sender, hanna = instance.member(f"Ida{suffix}"), instance.member(f"Hanna{suffix}")
+    watchers = [
+        (language, watch(code, language, hanna, instance.base, deadline=PATIENCE, seen=seen))
+        for language, code in blocks(served()[1]).items()
+    ]
+    time.sleep(INTERVAL * 3.5)
+    for language, watcher in watchers:
+        assert watcher.poll() is None, f"{language} ended on an empty inbox"
+    instance.send(sender, f"Hanna{suffix}", "the first one")
+    for language, out, err, code in ended(watchers):
+        assert code == 0, (language, err)
+        assert b"New mail" in out, language
+        assert DEADLINE_LINE not in out, language
 
 
 #: How long one ask of the inbox may take in the examples, in seconds.

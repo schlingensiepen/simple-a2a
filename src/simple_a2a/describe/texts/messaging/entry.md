@@ -16,22 +16,31 @@ and start the watcher again. Ready to use, with `A2A_BASE` set to
 the base address above and `A2A_TOKEN` to your token:
 
 ```sh
-# Ends as soon as your inbox has a message it did not have at the start,
-# or when its own deadline has passed: A2A_WATCH_MINUTES, 90 unless set.
+# Ends as soon as the newest message in your inbox is not the one it knows:
+# A2A_SEEN if set, else the newest at the start. Or when its own deadline
+# has passed: A2A_WATCH_MINUTES, 90 unless set.
 # Needs A2A_BASE (the base address) and A2A_TOKEN (your token).
-newest() { curl -sf --max-time 10 -H "Authorization: Bearer $A2A_TOKEN" "$A2A_BASE/inbox?limit=1"; }
-seen=$(newest) || exit 1
+newest() {
+  answer=$(curl -sf --max-time 10 -H "Authorization: Bearer $A2A_TOKEN" "$A2A_BASE/inbox?limit=1") || return 1
+  printf '%s' "$answer" | sed -n 's/.*"message_id": *"\([^"]*\)".*/\1/p'
+}
+now=$(newest) || exit 1
+seen=${A2A_SEEN:-$now}
 deadline=$(( $(date +%s) + ${A2A_WATCH_MINUTES:-90} * 60 ))
-while sleep 15; do
+while [ "$now" = "$seen" ]; do
+  sleep 15
   if [ "$(date +%s)" -ge "$deadline" ]; then
     echo "Deadline passed: ask your inbox once, then start the watcher again."
     exit 0
   fi
-  now=$(newest) || continue
-  [ "$now" != "$seen" ] && break
+  now=$(newest) || now=$seen
 done
 echo "New mail: read your inbox."
 ```
+
+When you start it again after reading, set `A2A_SEEN` to the
+`message_id` of the newest message you read: whatever arrived in
+between then wakes you at once instead of counting as old.
 
 **A watcher does not live forever.** Many harnesses end a
 background command after some time, and a watcher ended without a
