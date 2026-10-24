@@ -52,7 +52,11 @@ FENCE = re.compile(r"```(sh|python)\n(.*?)```", re.DOTALL)
 
 
 def blocks(text: str) -> dict[str, str]:
-    return {language: code for language, code in FENCE.findall(text)}
+    """The first block of each language: the watcher comes before any other example."""
+    found: dict[str, str] = {}
+    for language, code in FENCE.findall(text):
+        found.setdefault(language, code)
+    return found
 
 
 def free_port() -> int:
@@ -483,3 +487,32 @@ def test_an_ask_that_hangs_does_not_carry_the_watcher_past_its_deadline(language
         assert took <= DEADLINE + ASK_LIMIT + INTERVAL + SLACK, f"took {took:.1f}s"
     finally:
         stalling.stop()
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the example needs curl")
+def test_the_redemption_example_on_the_entry_keeps_the_answer_in_a_private_file(
+    instance: Instance, tmp_path: Path
+) -> None:
+    """Run as written: the answer lands unchanged in a file only its owner can read."""
+    examples = [code for language, code in FENCE.findall(served()[0]) if language == "sh"]
+    redeeming = [code for code in examples if "/invitations/redeem" in code]
+    assert len(redeeming) == 1, "one redemption example on the entry"
+    placeholder = "<your invitation>"
+    assert redeeming[0].count(placeholder) == 1
+    voucher = http(
+        "POST",
+        f"{instance.admin}/realms/household/teams/kitchen/invitations",
+        {"member_name": "Nora", "member_mission": "m", "display_name": "Nora"},
+        ADMIN_SECRET,
+    )["invitation"]
+    subprocess.run(
+        ["sh", "-c", redeeming[0].replace(placeholder, voucher)],
+        env={"PATH": os.environ.get("PATH", ""), "A2A_BASE": instance.base},
+        cwd=tmp_path,
+        check=True,
+        timeout=PATIENCE,
+    )
+    kept = tmp_path / "redeemed.json"
+    assert kept.stat().st_mode & 0o077 == 0, "readable by others"
+    token = json.loads(kept.read_text())["token"]
+    assert http("GET", f"{instance.base}/inbox", token=token)["entries"] == []

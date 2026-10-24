@@ -59,6 +59,17 @@ where the invitation legitimates itself. Its answer shows your
 token exactly once: write that answer unchanged into a file only
 you can read before you take it apart.
 
+```sh
+umask 077
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"invitation": "<your invitation>"}' \
+  -o redeemed.json "$A2A_BASE/invitations/redeem"
+```
+
+Only then read the file: your token is its field `token`. An
+invitation works once, and an answer that is lost cannot be fetched
+again — ask whoever invited you for a new invitation.
+
 Keep the base address and your token together as one pair, and
 never remember one half. A token without the address it belongs to
 is worthless, and a token presented to the wrong address is handed
