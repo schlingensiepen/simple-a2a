@@ -23,7 +23,8 @@ Two ways to start, one sequence of checks:
         runs the image with nothing set, only its three ports published on the
         loopback address and a named volume on the data directory, waits for the
         image's own health check rather than for an open port, reads the log with
-        `docker logs` and restarts with `docker restart`.
+        `docker logs`, and restarts by removing the container and running a new one
+        on the same volume — what an upgrade does.
 
 What it checks, in this order, one line each; the first failure stops the run with
 a non-zero exit and says what was expected and what came back:
@@ -106,6 +107,9 @@ ID_LENGTH = 43
 PATIENCE_SECONDS = 60.0
 POLL_SECONDS = 0.25
 REQUEST_TIMEOUT_SECONDS = 10.0
+
+#: The ports the image serves its three surfaces on when nothing is set.
+IMAGE_PORTS = (8251, 8252, 8253)
 
 JSON_ACCEPT = {"Accept": "application/json"}
 
@@ -307,7 +311,7 @@ class ProcessRunner(Runner):
 
 
 class ContainerRunner(Runner):
-    """The image, run with nothing set, on a named volume, restarted in place."""
+    """The image, run with nothing set, on a named volume, and run again on it."""
 
     bare = "no SIMPLE_A2A_* variable set beyond the two the image itself carries"
 
@@ -319,6 +323,7 @@ class ContainerRunner(Runner):
         self.name = name
         self.volume = volume
         self.ports = ports
+        self.earlier = ""
 
     def _run(self, *arguments: str) -> str:
         done = subprocess.run(
@@ -333,7 +338,12 @@ class ContainerRunner(Runner):
         return done.stdout
 
     def start(self) -> None:
-        published = [f"--publish=127.0.0.1:{port}:{port}" for port in self.ports]
+        # Each address the run was given, onto the port the image serves that
+        # surface on by default: nothing inside the container is set.
+        published = [
+            f"--publish=127.0.0.1:{outside}:{inside}"
+            for outside, inside in zip(self.ports, IMAGE_PORTS, strict=True)
+        ]
         self._run(
             "run",
             "--detach",
@@ -373,10 +383,16 @@ class ContainerRunner(Runner):
         super().wait_until_up(surfaces)
 
     def restart(self) -> None:
-        self._run("restart", self.name)
+        # Not `restart` on the same container: a new container on the same volume,
+        # which is what an upgrade does, and the only way to show that the holdings
+        # and the secret live on the volume rather than in a container layer. The
+        # log of the old one is kept, so "not written again" is checked across both.
+        self.earlier += self._run("logs", self.name)
+        self.stop()
+        self.start()
 
     def log(self) -> str:
-        return self._run("logs", self.name)
+        return self.earlier + self._run("logs", self.name)
 
     def stop(self) -> None:
         subprocess.run(
