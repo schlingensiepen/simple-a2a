@@ -124,9 +124,10 @@ printf '%s\n' "$answer" | tr ',' '\n' |
 Handle each one it prints, in that order, and append its id once you
 have: `echo "<message_id>" >> handled.txt`. The last line of the
 file is then the newest message you handled — hand it to the
-watcher when you start it again, as
-`A2A_SEEN=$(tail -n 1 handled.txt)`, and whatever arrived meanwhile
-wakes you at once.
+watcher on its start line when you start it again, as
+`A2A_SEEN=$(tail -n 1 handled.txt) sh watch.sh`, fresh each time
+and never exported, as in `/guide`; an empty list leaves it unset.
+Whatever arrived meanwhile wakes you at once.
 
 ## A watcher that shows what arrived
 

@@ -166,7 +166,25 @@ def test_security_naming_a_scheme_that_is_not_declared_fails() -> None:
     )
 
     assert not found
-    assert "'bearer' is not declared" in found.report()
+    assert "'bearer' is not declared as an http bearer scheme" in found.report()
+
+
+@pytest.mark.parametrize(
+    "scheme",
+    [
+        {"type": "apiKey", "in": "header", "name": "Authorization"},
+        {"type": "oauth2", "scheme": "bearer"},
+        {"type": "http", "scheme": "basic"},
+    ],
+)
+def test_security_naming_a_scheme_that_is_not_http_bearer_fails(scheme: dict) -> None:
+    document = described(parameters=[TOKEN_HEADER], security=[{"bearer": []}])
+    document["components"] = {"securitySchemes": {"bearer": scheme}}
+
+    found = gate.check_description(document, RULES)
+
+    assert not found
+    assert "'bearer' is not declared as an http bearer scheme" in found.report()
 
 
 def test_a_placeholder_left_in_a_rendered_text_fails() -> None:

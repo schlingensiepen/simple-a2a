@@ -489,33 +489,81 @@ def test_an_ask_that_hangs_does_not_carry_the_watcher_past_its_deadline(language
         stalling.stop()
 
 
+def redemption_example() -> str:
+    """The one shell example on the entry that redeems an invitation."""
+    examples = [code for language, code in FENCE.findall(served()[0]) if language == "sh"]
+    redeeming = [code for code in examples if "/invitations/redeem" in code]
+    assert len(redeeming) == 1, "one redemption example on the entry"
+    assert redeeming[0].count(REDEMPTION_PLACEHOLDER) == 1
+    return redeeming[0]
+
+
+REDEMPTION_PLACEHOLDER = "<your invitation>"
+
+
+def redeem_as_written(instance: Instance, cwd: Path, member: str) -> None:
+    """A fresh invitation, redeemed by the entry's example in `cwd`."""
+    voucher = http(
+        "POST",
+        f"{instance.admin}/realms/household/teams/kitchen/invitations",
+        {"member_name": member, "member_mission": "m", "display_name": member},
+        ADMIN_SECRET,
+    )["invitation"]
+    subprocess.run(
+        ["sh", "-c", redemption_example().replace(REDEMPTION_PLACEHOLDER, voucher)],
+        env={"PATH": os.environ.get("PATH", ""), "A2A_BASE": instance.base},
+        cwd=cwd,
+        check=True,
+        timeout=PATIENCE,
+    )
+
+
 @pytest.mark.skipif(shutil.which("curl") is None, reason="the example needs curl")
 def test_the_redemption_example_on_the_entry_keeps_the_answer_in_a_private_file(
     instance: Instance, tmp_path: Path
 ) -> None:
     """Run as written: the answer lands unchanged in a file only its owner can read."""
-    examples = [code for language, code in FENCE.findall(served()[0]) if language == "sh"]
-    redeeming = [code for code in examples if "/invitations/redeem" in code]
-    assert len(redeeming) == 1, "one redemption example on the entry"
-    placeholder = "<your invitation>"
-    assert redeeming[0].count(placeholder) == 1
-    voucher = http(
-        "POST",
-        f"{instance.admin}/realms/household/teams/kitchen/invitations",
-        {"member_name": "Nora", "member_mission": "m", "display_name": "Nora"},
-        ADMIN_SECRET,
-    )["invitation"]
-    subprocess.run(
-        ["sh", "-c", redeeming[0].replace(placeholder, voucher)],
-        env={"PATH": os.environ.get("PATH", ""), "A2A_BASE": instance.base},
-        cwd=tmp_path,
-        check=True,
-        timeout=PATIENCE,
-    )
-    kept = tmp_path / "redeemed.json"
+    redeem_as_written(instance, tmp_path, "Nora")
+    (kept,) = tmp_path.glob("redeemed-*.json")
     assert kept.stat().st_mode & 0o077 == 0, "readable by others"
     token = json.loads(kept.read_text())["token"]
     assert http("GET", f"{instance.base}/inbox", token=token)["entries"] == []
+    assert "( umask 077;" in redemption_example(), "the umask ends with the example"
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="the example needs curl")
+def test_redeeming_twice_keeps_the_first_answer(instance: Instance, tmp_path: Path) -> None:
+    """A second invitation does not overwrite the only copy of the first token."""
+    redeem_as_written(instance, tmp_path, "Olga")
+    redeem_as_written(instance, tmp_path, "Paula")
+    kept = sorted(tmp_path.glob("redeemed-*.json"))
+    assert len(kept) == 2, "the second answer replaced the first"
+    tokens = {json.loads(answer.read_text())["token"] for answer in kept}
+    assert len(tokens) == 2
+    for token in tokens:
+        assert http("GET", f"{instance.base}/inbox", token=token)["entries"] == []
+
+
+def test_the_entry_and_the_guide_carry_the_same_shell_watcher_byte_for_byte() -> None:
+    """The entry's copy is not run by the watcher tests; this keeps it the guide's."""
+    entry, guide, _ = served()
+    first_sh = [
+        next(code for language, code in FENCE.findall(text) if language == "sh")
+        for text in (entry, guide)
+    ]
+    assert first_sh[0].encode() == first_sh[1].encode()
+
+
+def test_the_texts_say_how_to_hand_the_watcher_its_seen_id() -> None:
+    """On the start line, fresh, never exported; from entries[0]; unset when empty."""
+    receiving = Guide(surface="messaging", base_address="https://a2a.example.org").part("receiving")
+    for text in served()[:2]:
+        said = " ".join(text.split())
+        assert "`A2A_SEEN=<message_id> sh watch.sh`" in said
+        assert "`entries[0].message_id`" in said
+        assert "never `export" in said
+        assert "if the inbox was empty, leave it unset" in said
+    assert "`A2A_SEEN=$(tail -n 1 handled.txt) sh watch.sh`" in " ".join(receiving.split())
 
 
 # ------------------------------------------------------------------ the receiving part

@@ -132,7 +132,15 @@ def _check_schemas(operation: dict[str, Any], where: str) -> list[str]:
 
 
 def _check_security(document: dict[str, Any], operation: dict[str, Any], where: str) -> list[str]:
-    """Behind a token exactly when the token header is read, and with a declared scheme."""
+    """Behind a token exactly when the token header is read, and with a declared scheme.
+
+    This is the generator's own predicate: an operation counts as reading the token
+    when it has the `Authorization` header parameter, the same test that added its
+    `security`. So the gate shows that the post-processing ran and agrees with
+    itself; it cannot see a route that needs a token but reads it some other way.
+    The proof that the description matches behaviour is the probe without a token,
+    `test_exactly_the_operations_behind_a_token_declare_security`.
+    """
     reads_token = any(
         parameter.get("in") == "header"
         and str(parameter.get("name", "")).lower() == "authorization"
@@ -145,9 +153,10 @@ def _check_security(document: dict[str, Any], operation: dict[str, Any], where: 
         return [f"{where}: declares security but works without a token"]
     schemes = (document.get("components") or {}).get("securitySchemes") or {}
     return [
-        f"{where}: security scheme {name!r} is not declared"
+        f"{where}: security scheme {name!r} is not declared as an http bearer scheme"
         for name in declared
-        if (schemes.get(name) or {}).get("scheme") != "bearer"
+        if ((schemes.get(name) or {}).get("type"), (schemes.get(name) or {}).get("scheme"))
+        != ("http", "bearer")
     ]
 
 
