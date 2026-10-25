@@ -8,20 +8,20 @@ Addresses here are relative to the base address you fetched this text
 from; the observer token travels as an `Authorization: Bearer
 <token>` header.
 
-Every listing is a window over a list: `offset`, default 0, and
-`limit`, default 25, at most 100, both as query parameters. Asking
-for more than 100 is refused and you are told the limit, because
-silently shortening would suggest you had reached the end of the
-list. Names in an address are percent-encoded, because a name may
-contain spaces.
+Every listing here is a window over a list, and names in an address
+are percent-encoded; the window parameters are in `/guide/concepts`,
+section "Answers, and the three shapes they come in", the encoding
+in its section "Names and ids".
 
 ## The teams
 
 - `GET /teams` — the names of the teams of your realm,
   alphabetically, with the address of each. This is the call nobody
   inside a team may have, and it is what this surface exists for.
-  Asked with `Accept: application/json`, it answers the same window
-  as data: `entries`, each with `team_name` and `member_count`.
+  Asked for JSON the way `/guide/concepts`, section "Answers, and
+  the three shapes they come in", describes, it answers the same
+  window as data: `entries`, each with `team_name` and
+  `member_count`.
 - `GET /teams/{team}` — one team: its name, how many members it has,
   and the addresses of its purpose and its members.
 - `GET /teams/{team}/purpose` — the purpose of the team, raw, as
@@ -32,10 +32,10 @@ contain spaces.
 - `GET /teams/{team}/peers` — the names of the members,
   alphabetically, a mark on whoever carries the realm master right
   and a second mark on anyone whose token has been revoked, and per
-  name the addresses of their two texts. Asked with
-  `Accept: application/json`, it answers the same window as data:
-  `entries`, each with `kind` (always `peer`), `name`,
-  `is_realm_master` and `token_revoked`, and the moments: `joined_at`,
+  name the addresses of their two texts. Asked for JSON the same
+  way, it answers the same window as data: `entries`, each with
+  `kind` (always `peer`), `name`, `is_realm_master` and
+  `token_revoked`, and the moments: `joined_at`,
   `token_revoked_at`, `realm_master_granted_at` and
   `realm_master_revoked_at` — the last two are the latest time the
   right was given and taken, so a grant later than the revocation
@@ -44,10 +44,10 @@ contain spaces.
   master, whether revoked, the same moments, and the addresses of the
   two texts.
 - `GET /teams/{team}/peers/{name}/mission` — their member-mission,
-  raw: what they were brought in for, set when they joined and static
-  since.
+  raw.
 - `GET /teams/{team}/peers/{name}/self` — their member-self-image,
-  raw: what they say they actually do. Empty until they set one.
+  raw, empty until they set one. What the two texts are is in
+  `/guide/concepts`, section "Two texts per participant".
 
 A moment the installation did not keep — the right given or taken
 before it began to record that — is `null` in the data and "not
@@ -81,14 +81,13 @@ one, `in_reply_to`. Newest first.
 
 - `sender_kind` and the kinds in `recipients` are `peer` for a team
   member and `service` for a central service, and never anything
-  else. Where a central service was shown an **alias** — the
-  one-delivery return handle it answers along — in place of a
-  sender, the alias is resolved for you and the participant behind
-  it is named. That resolution is the purpose of this surface.
+  else: the return handle a central service answers along is
+  resolved for you (`/guide/concepts`, section "Address kinds, and
+  why you never see a return handle").
 - `body_size` is the body alone and `total_size` is the body plus the
   bytes of the attached files, both in bytes, so you can see where
-  the weight lies before fetching anything. An attachment that is a
-  reference to another message transfers nothing and counts zero.
+  the weight lies before fetching anything. How attachments count
+  towards it is in `/guide/contents`, section "The attachments".
 - `in_reply_to` is in the listing and not only in the details, so a
   chain of replies can be followed without opening every entry. That
   chain is the identity of a conversation here — not the
@@ -120,8 +119,8 @@ where a window alone would not get you to one exchange.
 ## What an entry does not tell you
 
 Not the body, and not the subject beyond what stands in the entry.
-Those are fetched from their own addresses, so that reading a listing
-does not pull a mebibyte into your context; the part at
-`/guide/contents` describes them. And no read state: this service
-does not record what anyone has seen, yourself included, and there is
-nothing to acknowledge.
+Those are fetched from their own addresses, described in
+`/guide/contents`, because an overview does not pack texts in
+(`/guide/concepts`, section "Answers, and the three shapes they come
+in"). And no read state, yourself included (`/guide`, section "Read
+this before the first call").

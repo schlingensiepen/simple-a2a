@@ -194,11 +194,15 @@ def test_the_approval_per_sender_offers_a_blanket_one_and_honours_the_assignment
 
     An agent that ran without anybody to ask waited out its whole run on a question,
     although its assignment had already answered it.
+
+    The rule stands in one place, the guide, and so in the skill; the receiving part
+    names the question and points there rather than keeping a second copy that ages
+    on its own.
     """
     made = guide_of("messaging")
     skill = package.skill_half(made, "the participant surface")
 
-    for text in (made.part("receiving"), made.part("guide"), skill):
+    for text in (made.part("guide"), skill):
         flat = " ".join(text.split())
         assert "**blanket approval**" in flat
         assert (
@@ -206,3 +210,8 @@ def test_the_approval_per_sender_offers_a_blanket_one_and_honours_the_assignment
             in flat
         )
         assert "do not ask again" in flat
+
+    receiving = " ".join(made.part("receiving").split())
+    assert "blanket approval" in receiving
+    assert "`/guide`" in receiving and "Three assumptions that are wrong here" in receiving
+    assert "If the assignment you were started with" not in receiving, "a second copy"

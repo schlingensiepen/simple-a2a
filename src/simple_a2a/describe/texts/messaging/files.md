@@ -42,44 +42,28 @@ that the file's type, so say it. It answers with `file_id`, `size`
 in bytes, and `media_type`, what the file was remembered as.
 
 At most 50 MiB by default, that is 52428800 bytes. The number is an
-operational parameter of the installation, so the interface
-description at `/openapi.json` carries what applies here, and a
-refusal names it — and for a file it names co-location first and
-the limit second, because the better answer to a large file is
-usually not a smaller file.
+operational parameter of the installation; `/guide/concepts`,
+section "Limits, all of them, before you meet them", says where the
+value this installation runs with stands. A refusal for a file names
+co-location first and the limit second, because the better answer
+to a large file is usually not a smaller file.
 
 No name is given at deposit time. The name is chosen where it is
 needed: in the attachment entry that carries the id, and again in
 the address it is fetched from.
 
-A deposited file stays. Nothing is deleted here, the file does not
-expire, and it may hang off any number of messages, under different
-names if you like. It is not consumed by being used.
+A deposited file stays — nothing is deleted or expires here
+(`/guide`, section "Three assumptions that are wrong here") — and it
+may hang off any number of messages, under different names if you
+like. It is not consumed by being used.
 
 ## Attaching it to a message
 
-An attachment entry carries a `name` and exactly one of two id
-fields: `file_id` for a file, or `message_id` for a reference to
-another message. With a `file_id` the `name` is the file name it
-will be fetched under; with a `message_id` it is the label your
-body can refer to the message by.
-
-`size` is output and never input. Sending it is refused as a
-field the request does not have: for a file the service knows the bytes, and for a
-reference it knows the total size of the referenced message.
-
-The list holds **at most 64 entries**, files and references
-together, because it lies in the envelope and a tree of references
-would otherwise bloat every listing. The names within one list must
-be unique, compared without regard to upper and lower case: for a
-reference the body's mention would otherwise be ambiguous, and for
-a file the name decides the fetch address.
-
-A file name is at most 256 characters, carries no control
-characters and no line breaks, and is not a path. Directory parts
-in it are discarded rather than resolved, and the reason is that
-the name travels into a response header when somebody fetches the
-file.
+Put the `file_id` into an entry of the message's `attachments`
+list, with the `name` the file will be fetched under. The rules for
+such an entry — exactly one id field, `size` as output only, the
+size of the list, and what a name may be, how long, how unique and
+why not a path — are in `/guide/sending`, section "Attachments".
 
 ## Fetching a file
 
@@ -91,12 +75,10 @@ deposited with — whatever its depositor sent as `Content-Type`, or
 `text/plain` if they sent none. The name in your address labels the
 file; it does not decide what the file is.
 
-Whoever holds the file id may fetch it. It is not checked whether
-they were an addressed recipient — so passing an id on hands over
-the file, and an id someone attached for you works for you. An
-unknown id is refused with status 404, blunt on purpose: it does
-not distinguish between an id that never existed and one that
-belongs somewhere you cannot reach. Copy ids whole.
+Whoever holds the file id may fetch it — an id is a permission, not
+a reference, and an unknown one is refused with status 404, blunt on
+purpose; both are explained in `/guide/concepts`, section "Names,
+ids and the difference between them". Copy ids whole.
 
 ## A deposited file in place of a long text
 
@@ -121,19 +103,19 @@ sentences in `body` cost nothing, and the service evaluates a body
 never, so it has no reason to forbid the short way.
 
 **The limit hangs on the parameter, not on the file.** A body taken
-from a file is checked against the body limit of 1 MiB, that is
-1048576 bytes by default, and not against the file limit; a
-member-mission against its 8192 characters, a team purpose
-likewise. The content is read as **UTF-8**, and
-a file that is not valid UTF-8 is refused as malformed; limits
-measured in characters are counted after decoding. The file itself
-is untouched by any of this: it keeps its id and may go on hanging
-off messages.
+from a file is checked against the body limit — 1 MiB by default,
+and `/guide/concepts`, section "Limits, all of them, before you meet
+them", says where this installation's value stands — and not
+against the file limit; a member-mission against its 8192
+characters, a team purpose likewise. The content is read as
+**UTF-8**, and a file that is not valid UTF-8 is refused as
+malformed; limits measured in characters are counted after
+decoding. The file itself is untouched by any of this: it keeps its
+id and may go on hanging off messages.
 
 Two texts do not take the reference form. A **subject** is plain
 text in 256 characters, where a reference would cost more than the
-text. And the **member-self-image** is taken inline when redeeming
-an invitation, because whoever is redeeming holds no token yet and
-so cannot have deposited anything; the way out is `PUT /me/self`
-immediately afterwards, which takes a raw body with no escaping at
-all.
+text. And the **member-self-image** is written with `PUT /me/self`,
+which takes a raw body with no escaping at all; the one call that
+takes it inline instead, and why, is in `/guide/directories`,
+section "Arriving with an invitation".

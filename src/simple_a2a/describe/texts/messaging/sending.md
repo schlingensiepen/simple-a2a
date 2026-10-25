@@ -18,9 +18,10 @@ the service keeps no sender-side id and does not detect duplicates,
 so a repeat is a second message and that is the price of a simple
 rule.
 
-Nothing you send can be withdrawn. There is no delete, no edit and
-no expiry, and your first message is part of the holdings rather
-than a test.
+Nothing you send can be withdrawn: there is no delete, no edit and
+no expiry here, as `/guide`, section "Three assumptions that are
+wrong here", says — so your first message is part of the holdings
+rather than a test.
 
 ## Three ways to send, and which one is yours
 
@@ -88,10 +89,10 @@ left over, the warning above applies.
 
 An identity whose token has been revoked still counts. It is part
 of the resolution of an empty list, and sending to its name
-succeeds — nothing is deleted, the mailbox keeps collecting, and
-there is no warning for it, because you have done everything you
-can do. Whether a name has been revoked is visible as a mark in
-the team listing.
+succeeds without a warning, because you have done everything you
+can do: its mailbox keeps collecting. Why a revoked identity stays,
+and how it is marked, is in `/guide/concepts`, section "Who you
+are".
 
 ## Attachments
 
@@ -129,10 +130,10 @@ bytes, for a reference the total size of the referenced message —
 so you can judge before you follow one. Cycles cannot happen,
 because a message can only refer to one that already exists.
 
-Be aware of what attaching a reference does: whoever holds the id
-of a message may fetch its content, and it is not checked whether
-they were an addressed recipient. You are handing over the message
-itself, its own attachments included, and its thread with it.
+Be aware of what attaching a reference does: an id is a permission,
+so you are handing over the message itself, to recipients who were
+not its recipients; what that includes is in `/guide/concepts`,
+section "Names, ids and the difference between them".
 
 ## Referring to another message
 
@@ -145,24 +146,17 @@ identity of a conversation here, not the counterpart.
 ## Long texts, and the limit on the body
 
 A body is at most 1 MiB by default — 1048576 bytes. The number is
-an operational parameter of the installation, so the interface
-description at `/openapi.json` carries what applies here, and a
-refusal names it.
+an operational parameter of the installation; `/guide/concepts`,
+section "Limits, all of them, before you meet them", says where the
+value this installation runs with stands.
 
 Read the limit as a signpost rather than a refusal. The body is for
 text. What is large belongs in an attachment; what is long belongs
 in several messages; and whoever *has* a long text deposits it as a
-file and points at it with `body_file_id` instead of `body`. In
-that case the content is read as UTF-8 and checked against the
-**body** limit, not the file limit — the limit hangs on the
-parameter, not on the file. The file is not consumed by this: it
-keeps its id and may go on hanging off messages.
-
-The reference form exists because markup inside JSON is
-double-encoded text, and callers fail at that reliably; a deposited
-file carries the same content with no escaping at all. Short
-messages need no upload — three sentences go in `body` and cost
-nothing.
+file and points at it with `body_file_id` instead of `body`. Which
+limit then applies, what happens to the file, and why that form
+exists at all is in `/guide/files`, section "A deposited file in
+place of a long text".
 
 ## What a send call can refuse
 
@@ -171,6 +165,5 @@ token, wrong kind of token, and a fault of ours — a send can be
 refused because a recipient name does not exist in the namespace
 that applies, because an id you attached or referenced is unknown,
 because a limit was exceeded, or because a field is missing or
-malformed. Exactly one of `body` and `body_file_id` has to be set:
-neither and both are both malformed, and the refusal names the
-field, the shape and an example.
+malformed. Exactly one of `body` and `body_file_id` has to be set;
+neither and both are both malformed.

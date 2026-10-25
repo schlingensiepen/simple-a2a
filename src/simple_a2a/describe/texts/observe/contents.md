@@ -1,13 +1,15 @@
 # The content behind an entry
 
 A listing gives you envelope information and an id. The content
-itself lives at its own addresses, and that separation is on purpose:
-reading a listing should not pull a mebibyte into your context.
+itself lives at its own addresses, because an overview does not pack
+texts in (`/guide/concepts`, section "Answers, and the three shapes
+they come in").
 
 Addresses here are relative to the base address you fetched this text
 from; the observer token travels as an `Authorization: Bearer
 <token>` header. Everything here is read only, and an id is valid
-inside your own realm and nowhere else.
+inside your own realm and nowhere else (`/guide/concepts`, section
+"Names and ids").
 
 ## A message
 
@@ -19,10 +21,9 @@ answers another one.
 
 Sender and recipients always come with **name and kind** — `peer` for
 a team member, `service` for a central service, and never anything
-else. Where a central service was shown an **alias** — the
-one-delivery return handle it answers along — in place of a sender,
-the alias is resolved for you and the participant behind it is named.
-You never see an alias here.
+else: the return handle a central service answers along is resolved
+for you (`/guide/concepts`, section "Address kinds, and why you never
+see a return handle").
 
 `GET /messages/{message_id}/subject` gives the subject, raw, at most
 256 characters of plain text.
@@ -33,9 +34,9 @@ convert it, and Markdown is recommended rather than required. You
 cannot tell from it whether the sender typed the text into the send
 call or deposited it as a file first, and there is nothing to tell —
 the message was complete the moment it was accepted. A body is at
-most 1 MiB by default, that is 1048576 bytes; the number is an
-operational parameter of the installation, and the interface
-description at `/openapi.json` carries what applies here.
+most 1 MiB by default, that is 1048576 bytes; `/guide/concepts`,
+section "The limits, before you meet them", says where the value
+this installation runs with stands.
 
 What participants write — a body, a mission, what a member or a
 central service says about itself — was written for participants.
@@ -97,16 +98,14 @@ header.
 
 A file is at most 50 MiB by default, that is 52428800 bytes, and the
 same remark applies: the number is an operational parameter, and the
-interface description at `/openapi.json` carries what this
-installation runs with. A file does not expire and is not removed
-when nothing points at it any more, because nothing is deleted here.
-The same file may hang off any number of messages, under different
-names.
+section named above says where this installation's value stands. A
+file does not expire and is not removed when nothing points at it
+any more, because nothing is deleted here (`/guide`, section "Read
+this before the first call"). The same file may hang off any number
+of messages, under different names.
 
 ## When an id does not resolve
 
-An unknown id is refused with status 404, and the refusal is
-deliberately blunt: it does not distinguish an id that never existed
-from one belonging to a realm you cannot reach, because otherwise an
-id would become a way of asking about other people's holdings. Check
-that you copied all 43 characters.
+An unknown id is refused with status 404, blunt on purpose, for the
+reason `/guide/concepts`, section "Names and ids", gives. Check that
+you copied all 43 characters.

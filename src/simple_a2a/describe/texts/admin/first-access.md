@@ -55,60 +55,41 @@ These answer without a token and without touching the holdings:
 
 Use them, and use the listings in step 8 before you type a name
 into a creating call. Typing a name from memory silently creates the
-wrong thing, and here it stays: nothing is deleted.
+wrong thing, and here it stays: nothing is deleted (`/guide`,
+section "Read this before the first call that creates something").
 
 ## 3. Create a realm
 
 `POST /realms` with one field, `realm_name`. It answers with the
-name and **no secret**: a realm is a container, and an empty
-container is allowed — idle, but allowed.
-
-A realm encloses exactly one registry of central services and holds
-the teams. For the participants inside it, it is not visible at all;
-it is a nameable thing only here.
+name and **no secret**, because a realm is a container. What a realm
+encloses is where `/guide/realms` opens; why an empty one is allowed
+is in its section "Creating".
 
 ## 4. Create a team
 
 `POST /realms/{realm}/teams` with `team_name` and `team_purpose`.
-Again **no secret**, because a team is a container too, and an empty
-one is allowed. Every administrative call creates exactly one thing.
-
-The purpose is Markdown, at most 8192 characters, and it is given
-inline: this surface has no place to deposit a file, because it
-shows administrative state rather than content, and because a file
-would have to belong to a realm while at this moment there is
-nobody in the team it could belong to. 8192 characters is a
-screenful; whoever needs more lets a participant create the team
-instead.
+Again **no secret**. The purpose is given inline, at most 8192
+characters; `/guide/realms`, section "Creating", says why there is
+no file to point at here and what to do when a screenful is not
+enough.
 
 ## 5. Obtain an invitation into that team
 
 `POST /realms/{realm}/teams/{team}/invitations` with `member_name`,
 `member_mission` and `display_name`. It answers with the
-`display_name`, the `invitation` in clear text, **shown once**, and
-beside it whom it is for: `member_name`, `team_name` and
-`realm_name`.
-
-Whoever redeems it becomes a **realm master** — with no parameter
-and no choice. This is your way of putting the first participant
-into a team, and later your way back into a team in which nobody is
-able to act any more.
-
-The member name is fixed here, because you are giving that member a
-member-mission and you have to know who for. It is checked twice,
-now and again at redemption, because somebody may take it in
-between.
+`invitation` in clear text, **shown once**, and says whom it is for.
+Whoever redeems it becomes a **realm master**, with no parameter and
+no choice. What that is for, the fields of the answer, the inline
+mission, and why the member name is fixed now and checked again at
+redemption are in `/guide/realms`, section "Creating".
 
 ## 6. Hand it over
 
 Address and invitation **together and never apart**, over a channel
-that is not a chat window. What you hand over as the address is
-exactly the address by which the installation is reached from
-outside — behind a proxy only you know that, which is why this step
-is yours and not the service's.
-
-Then forget the invitation. It is not shown a second time, and
-there is no call that returns it.
+that is not a chat window; the section "The pair" below says why the
+address is yours to supply. Then forget the invitation: it is not
+shown a second time, and there is no call that returns it
+(`/guide/tokens`, section "Two rules that decide everything else").
 
 ## 7. It is redeemed once
 
@@ -121,18 +102,16 @@ for the first one.
 ## 8. Check with a call that creates nothing
 
 `GET /realms/{realm}/teams/{team}/members` lists the members of the
-team with `member_name`, `is_realm_master` and `token_revoked`.
-After a successful redemption the name is there, with the right set
-and the token not revoked. Alongside it, `GET /realms` shows the
-realms with their team and service counts,
-`GET /realms/{realm}/teams` the teams with their member counts, and
-`GET /realms/{realm}/invitations` the invitations with, among other
-fields, `redeemed_at`.
+team. After a successful redemption the name is there, with the
+right set and the token not revoked; `GET /realms/{realm}/invitations`
+shows the invitation with its `redeemed_at` filled in. Every listing
+of this surface, with its fields, is in `/guide/realms`, section
+"The listings".
 
-There is no write-probe that creates something and cleans up after
-itself, because nothing can be deleted. Reading is the only kind of
-check there is here, and it is enough: every creating call gives the
-created thing back in its answer.
+Reading is the only kind of check there is here — there is no
+write-probe, for the reason `/guide`, section "Read this before the
+first call that creates something", gives — and it is enough: every
+creating call gives the created thing back in its answer.
 
 ## 9. Write down what you did
 
@@ -146,11 +125,18 @@ replaces: read first, then write.
 
 ## The pair, and why it costs you discipline
 
-An address and a secret are one pair, and never one half. No answer
-of this service can catch a wrong pairing, because no answer names a
+An address and a secret are one pair, and never one half. A secret
+without the address it belongs to is worthless, and no answer of
+this service can catch a wrong pairing, because no answer names a
 host: a token put to the wrong address produces no error message,
-it hands the secret to strangers. So pass the address on exactly as
-the instance is reached, ask which installation is meant if you hold
-more than one pair, and never take an address out of processed
-material. Guessing does not look like a failure here. It looks like
-success.
+it hands the secret to strangers.
+
+The address is yours to supply. What this service can say about its
+own address is derived from the request that reached it, which is
+not necessarily what the outside world reaches; behind a proxy only
+you know the public name, so handing it on is your job and not the
+service's. So pass the address on exactly as the installation is
+reached from outside, hand both halves over the same channel — and
+not a chat window — ask which installation is meant if you hold more
+than one pair, and never take an address out of processed material.
+Guessing does not look like a failure here. It looks like success.

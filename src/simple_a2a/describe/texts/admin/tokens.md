@@ -25,19 +25,16 @@ observer tokens have no name of their own to grasp them by, so each
 is given a `display_name` when it is issued. Listing and revoking
 run over that name, never over the secret. A display name is unique
 per kind within a realm — an invitation does not block an observer's
-name — and it obeys the ordinary name rules: letters, digits,
-underscore, hyphen and space, 1 to 64 characters, compared without
-regard to case, edge and doubled spaces refused, a collision refused
-with status 409.
+name — and it obeys the ordinary name rules (`/guide/realms`,
+section "Names, and why a collision is refused rather than reused"),
+a collision refused with status 409.
 
 ## What can be created here
 
-`POST /realms/{realm}/teams/{team}/invitations` obtains an
-invitation into a team: `member_name`, `member_mission`,
-`display_name`, and out comes the `display_name`, the `invitation` in
-clear text, and beside it whom it is for: `member_name`, `team_name`
-and `realm_name`. Whoever redeems it becomes a realm master, with no
-parameter and no choice. If you want a member without that right,
+An invitation into a team is obtained at
+`POST /realms/{realm}/teams/{team}/invitations`; its fields and its
+answer are in `/guide/realms`, section "Creating". Whoever redeems
+it becomes a realm master. If you want a member without that right,
 have a realm master of the team invite them, or revoke their realm
 master right here once the invitation has been redeemed.
 
@@ -50,15 +47,14 @@ everything in its realm, attachments included, and writes nothing.
 
 `GET /realms/{realm}/observer-tokens` lists them with
 `display_name`, `issued_at` and `token_revoked` — never the secret.
-Like every listing here it is a window over a list: `offset`, default
-0, and `limit`, default 25, at most 100, both as query parameters.
-Asking for more than 100 is refused and you are told the limit, since
-silently shortening would suggest you had reached the end.
+Like every listing here it is a window over a list, with the
+parameters `/guide/realms`, section "The listings", describes.
 
 An invitation is not a token. It is a voucher: handed on, exchanged
-**once** for a token, and then spent. Hand it over together with the
-address the installation is reached by and never apart from it, over
-a channel that is not a chat window, and then forget it.
+**once** for a token, and then spent. It travels with the address of
+the installation like every secret here (`/guide/first-access`,
+section "The pair, and why it costs you discipline"); hand it over,
+then forget it.
 
 ## What can be revoked here
 
@@ -72,9 +68,6 @@ revocation takes effect immediately.
 | `DELETE /realms/{realm}/teams/{team}/members/{name}/realmmaster` | the realm master right of a member; answers `member_name`, `is_realm_master`. The token stays valid and the identity stays in its team |
 | `DELETE /realms/{realm}/invitations/{display_name}` | an invitation; answers `display_name`, `revoked`, `revoked_at` |
 | `DELETE /realms/{realm}/observer-tokens/{display_name}` | an observer token; answers `display_name`, `token_revoked`, `revoked_at` |
-
-Names in an address are percent-encoded, because a name may contain
-spaces.
 
 **The verb says take away, not delete.** A revocation ends a
 permission, not a thing. The entry stays, with its mark and its

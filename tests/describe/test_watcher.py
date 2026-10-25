@@ -518,11 +518,19 @@ def test_an_ask_that_hangs_does_not_carry_the_watcher_past_its_deadline(language
         stalling.stop()
 
 
+DIRECTORIES = "directories"
+
+
+def directories() -> str:
+    """The part that carries the redemption, as it is handed out."""
+    return Guide(surface="messaging", base_address="https://a2a.example.org").part(DIRECTORIES)
+
+
 def redemption_example() -> str:
-    """The one shell example on the entry that redeems an invitation."""
-    examples = [code for language, code in FENCE.findall(served()[0]) if language == "sh"]
+    """The one shell example in the directories part that redeems an invitation."""
+    examples = [code for language, code in FENCE.findall(directories()) if language == "sh"]
     redeeming = [code for code in examples if "/invitations/redeem" in code]
-    assert len(redeeming) == 1, "one redemption example on the entry"
+    assert len(redeeming) == 1, "one redemption example in the directories part"
     assert redeeming[0].count(REDEMPTION_PLACEHOLDER) == 1
     return redeeming[0]
 
@@ -530,8 +538,37 @@ def redemption_example() -> str:
 REDEMPTION_PLACEHOLDER = "<your invitation>"
 
 
+def test_the_redemption_example_is_written_once_and_the_entry_points_to_it() -> None:
+    """One part carries it, where the redemption is described; the entry links there.
+
+    A second copy on the entry would have to be byte-identical forever, and the entry
+    is the one text that is rendered per instance.
+    """
+    example = redemption_example()
+    entry, _, skill = served()
+    guide = Guide(surface="messaging", base_address="https://a2a.example.org")
+
+    assert "```" not in entry, "the entry carries no example"
+    assert "/invitations/redeem" not in entry
+    for name, text in guide.parts().items():
+        if name != DIRECTORIES:
+            assert example not in text, name
+            assert not any("/invitations/redeem" in code for _, code in FENCE.findall(text)), name
+    assert directories().count(example) == 1
+    assert skill.count(example) == 1, "the skill carries it exactly once, via the part"
+
+    said = " ".join(entry.split())
+    start = said.find("If you hold an invitation and not yet a token")
+    assert start >= 0
+    pointer = said[start : start + 600]
+    assert "shows your token exactly once" in pointer
+    assert "file only you can read" in pointer
+    assert '"Arriving with an invitation" in https://a2a.example.org/guide/directories' in pointer
+    assert "snippet" in pointer
+
+
 def redeem_as_written(instance: Instance, home: Path, member: str) -> Path:
-    """A fresh invitation, redeemed by the entry's example with `home` as HOME.
+    """A fresh invitation, redeemed by the part's example with `home` as HOME.
 
     It runs in a working directory of its own beside `home`, which has to stay
     empty: the answer belongs in the private directory, not where one works.
@@ -558,7 +595,7 @@ def redeem_as_written(instance: Instance, home: Path, member: str) -> Path:
 
 
 @pytest.mark.skipif(shutil.which("curl") is None, reason="the example needs curl")
-def test_the_redemption_example_on_the_entry_keeps_the_answer_in_a_private_file(
+def test_the_redemption_example_keeps_the_answer_in_a_private_file(
     instance: Instance, tmp_path: Path
 ) -> None:
     """Run as written: the answer lands unchanged in a file only its owner can read."""
@@ -1054,10 +1091,11 @@ def test_the_showing_watcher_drops_control_characters_from_bodies(tmp_path: Path
     assert shown == f"> first--- {forged}[2Ksecond--- {forged}third\ttab"
 
 
-def test_the_entry_points_to_the_concepts_for_the_realm_master_field() -> None:
+def test_the_redemption_points_to_the_concepts_for_the_realm_master_right() -> None:
     """Half a sentence by the redemption example, not an explanation of its own."""
-    entry = served()[0]
-    after = entry[entry.find("/invitations/redeem") :]
+    part = directories()
+    after = part[part.find("/invitations/redeem") :]
     said = " ".join(after[: after.find("## ")].split())
     assert "`is_realm_master`" in said
-    assert "https://a2a.example.org/guide/concepts" in said
+    assert "`/guide/concepts`" in said and "Who you are" in said
+    assert "permits two things" not in said, "the right is explained in the concepts alone"

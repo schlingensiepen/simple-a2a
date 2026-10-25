@@ -16,28 +16,27 @@ carry it.
 
 **The natural route is teams first.** `GET /teams` gives the teams
 of your realm; then `GET /teams/{team}/traffic` gives what moved
-inside one of them. That is why a team stands in the address of the
-traffic rather than in a filter, and it is why there is no
-realm-wide traffic listing: it would have no reader.
+inside one of them. Why the team stands in that address, and why
+there is no realm-wide traffic listing, is in `/guide/traffic`,
+section "The traffic of a team".
 
-**You see the real sender, always.** Where a central service was
-shown a one-off return handle instead of a sender, that handle is
-resolved for you and you see the participant behind it, by name and
-kind. That resolution is the point of observing.
+**You see the real sender, always.** The one-off return handle a
+central service is shown is resolved for you; `/guide/concepts`,
+section "Address kinds, and why you never see a return handle",
+says what that handle is.
 
-**A message to everyone appears once.** The list of recipients was
-resolved when the message was sent, so a broadcast stands in the
-traffic with all its recipients in one entry, not as one copy per
-recipient.
+**A message to everyone appears once,** with all its recipients in
+one entry; `/guide/traffic`, section "The traffic of a team", says
+why.
 
 **Nothing is deleted, and nothing expires.** The holdings only grow.
 There is no read state either: this service does not record what you
 have looked at, and there is nothing to acknowledge.
 
-**The order is the arrival timestamp, newest first.** Messages
-carrying the same timestamp have no defined order among themselves,
-and there is no further promise than that — so identify an entry by
-its id and not by its position.
+**The order is the arrival timestamp, newest first,** and position
+is no identity: `/guide/concepts`, section "Answers, and the three
+shapes they come in", says what is promised about the order and
+what is not.
 
 **Where a token comes from.** An observer token is issued by the
 operator of this installation, and by nobody else. There is no call
@@ -50,10 +49,14 @@ because whoever has no token will not find one.
 
 - `/guide/concepts` — the vocabulary and the rules that hold on
   every call: realm, team, peer, central service, the two texts a
-  participant carries, names, ids, address kinds, timestamps, media
-  types, the window over a listing, and how a refusal is shaped.
+  participant carries, names, ids, address kinds and the return
+  handle you never see, timestamps, media types, the order of the
+  holdings, the window over a listing, the limits, and how a refusal
+  is shaped.
 - `/guide/traffic` — the teams of your realm, the members of a team,
   the registry of central services, and the traffic listing of a
-  team with its filters and its fields.
+  team: why a team stands in its address, its fields, how a
+  broadcast appears, and its filters.
 - `/guide/contents` — the content behind an entry: the envelope of a
-  message, its subject, its body, and the files that were attached.
+  message, its subject, its body, the attachment list and how its
+  sizes are counted, and the files that were attached.

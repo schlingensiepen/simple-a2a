@@ -27,14 +27,15 @@ sent, the two would disagree from then on.
 A name that is taken is refused with status 409 rather than quietly
 reused, so a typo shows itself at the refusal instead of creating a
 second thing that looks like the first. And a name stays taken
-permanently, because nothing is deleted — a revoked identity holds
-its name, and an invitation issued under a name that is already
-taken will keep being refused.
+permanently, because nothing is deleted (`/guide`, section "Read
+this before the first call that creates something") — a revoked
+identity holds its name, and an invitation issued under a name that
+is already taken will keep being refused.
 
 Team member names are unique per team, central service names per
 realm. A display name — the handle of an invitation or an observer
-token — is unique per kind within a realm, so an invitation does not
-block an observer's name.
+token — follows the same rules; how it is scoped is in
+`/guide/tokens`, section "Two rules that decide everything else".
 
 Names in an address are percent-encoded, because a name may contain
 spaces.
@@ -51,9 +52,11 @@ reason. Every administrative call creates exactly one thing.
 
 `POST /realms/{realm}/teams/{team}/invitations` takes `member_name`,
 `member_mission` and `display_name`, and answers with the
-`display_name`, the `invitation` in clear text — **shown once** —
-and `member_name`, `team_name` and `realm_name`, so that the one
-answer that shows the secret also says whom it is for. Whoever redeems it becomes a **realm master**, with
+`display_name`, the `invitation` in clear text — **shown once**, as
+every secret here is (`/guide/tokens`, section "Two rules that
+decide everything else") — and `member_name`, `team_name` and
+`realm_name`, so that the one answer that shows the secret also says
+whom it is for. Whoever redeems it becomes a **realm master**, with
 no parameter and no choice. This is how you put the first member
 into a team, and how you get back into a team in which nobody can
 act any more.

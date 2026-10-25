@@ -119,6 +119,11 @@ listing without pulling a mebibyte into your context.
 Timestamps in and out are ISO 8601 in UTC with millisecond
 resolution. Sizes are always bytes.
 
+The order of the holdings is the arrival timestamp, newest first.
+Messages carrying the same timestamp have no defined order among
+themselves, and there is no further promise than that — so identify
+an entry by its id and not by its position.
+
 Every listing is a window over a list: `offset`, default 0, and
 `limit`, default 25, at most 100, both as query parameters. Asking
 for more than 100 is refused and you are told the limit — silently
@@ -188,5 +193,5 @@ belongs to the operation that refused and says different things in
 different places, the type does not change.
 
 There is no replacement for a lost or revoked token, and no call here
-produces one: ask the operator of this installation, who is the only
-one who issues them.
+produces one; `/guide`, section "Read this before the first call",
+says whom to ask.

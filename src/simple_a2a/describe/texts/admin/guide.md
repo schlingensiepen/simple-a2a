@@ -22,52 +22,45 @@ because there is nothing to tidy with. Check a name before you send
 it.
 
 **A secret is shown exactly once, in the answer that creates it.**
-The service holds no secrets and hands none out: there is no call
-that returns an existing secret, no replacement for a lost token,
-and no listing with a value in it. Whatever you want to do with a
-secret, do it with that one answer — there is no later, because
-afterwards the value is nowhere.
+Whatever you want to do with a secret, do it with that one answer;
+`/guide/tokens`, section "Two rules that decide everything else",
+says why there is no later.
 
 **A secret and the address it belongs to travel together, or the
-secret is lost.** What this service can say about its own address
-is derived from the request that reached it, which is not
-necessarily what the outside world reaches. Behind a proxy only you
-know the public name, so handing it on is your job and not the
-service's. Hand both halves over the same channel, and not a chat
-window.
+secret is lost.** Why the address is yours to supply and why no
+answer can catch a wrong pairing is in `/guide/first-access`,
+section "The pair, and why it costs you discipline".
 
-**Revoking ends a permission, not a thing.** The entry stays, with
-a mark and a timestamp, and it stays readable, because messages from
-a revoked identity are still lying in mailboxes and somebody has to
-be able to look up who that was. The verb in the address is the
-usual one for "take this away"; it does not mean anything
-disappears.
+**Revoking ends a permission, not a thing.** The entry stays, with a
+mark and a timestamp; `/guide/tokens`, section "What can be revoked
+here", says what stays readable and why.
 
-**Appointing and revoking are deliberately asymmetric.** Whoever
-may appoint may not depose. Otherwise two holders of the one right
-could strip each other, and that needs an arbitration rule — which
-is exactly the apparatus this service does without. This
-administration is the only place where anything is revoked.
+**Appointing and revoking are deliberately asymmetric.** Whoever may
+appoint may not depose, and this administration is the only place
+where anything is revoked; the reason is in `/guide/tokens`, section
+"Appointing is not the mirror of revoking".
 
 **There is no way to replace a lost token.** Whoever loses theirs is
-invited again **under a new name** and introduces themselves to the
-others; you cannot restore the old one, and the old name stays
-taken. Do not promise anyone otherwise.
+invited again under a new name; `/guide/tokens`, section "What can
+be revoked here", says what that means for the old name. Do not
+promise anyone otherwise.
 
 ## The parts of this guide
 
 - `/guide/first-access` — from a bare start to a team somebody can
   work in: taking the administration secret in hand, looking around
-  without creating anything, realm, team, invitation, handover, and
-  the one check that creates nothing.
-- `/guide/realms` — the containers and the listings: creating a
-  realm and a team, obtaining an invitation into a team, and
+  without creating anything, realm, team, invitation, handover, the
+  one check that creates nothing, and why address and secret are one
+  pair.
+- `/guide/realms` — the containers and the listings: names, creating
+  a realm and a team, obtaining an invitation into a team, and
   reading which teams, members, central services and invitations
   exist.
-- `/guide/tokens` — the secrets and their ends: issuing an observer
-  token, revoking a member's token, a central service's token, the
-  one right, an invitation, or an observer token, and what a
-  repeated revocation says.
+- `/guide/tokens` — the secrets and their ends: the two rules every
+  secret follows, display names, issuing an observer token, revoking
+  a member's token, a central service's token, the one right, an
+  invitation, or an observer token, what a repeated revocation says,
+  and what a stolen secret can do.
 - `/guide/notes` — the global setup note and the one per realm: the
   place where you write down what you did, because this service
   knows nothing about that and only keeps what you put there.

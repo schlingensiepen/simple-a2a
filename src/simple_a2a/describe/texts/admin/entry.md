@@ -26,10 +26,9 @@ carries the address will keep saying so until the proxy is fixed.
 <!-- /plain-http -->
 
 Keep the base address and the token together as one pair, and hand
-secrets on the same way. A token without the address it belongs to
-is worthless, and a token presented at the wrong address is given
-away to strangers — nothing here will tell you that it happened,
-because no answer names a host.
+secrets on the same way; the section "The pair, and why it costs
+you discipline" in %%BASE%%/guide/first-access says why no answer
+here can catch a wrong pairing.
 
 ## Prose and data
 
@@ -48,9 +47,11 @@ is a single concern and reads on its own.
 - %%BASE%%/guide/first-access — from a bare start to a working
   team, in order, with the mistakes that cannot be undone.
 - %%BASE%%/guide/realms — realms, teams, members and central
-  services: creating the containers and reading the listings.
-- %%BASE%%/guide/tokens — the secrets: obtaining an invitation,
-  issuing an observer token, and revoking either.
+  services: creating the containers, obtaining an invitation into a
+  team, and reading the listings.
+- %%BASE%%/guide/tokens — the secrets: the rules every secret
+  follows, issuing an observer token, and revoking a token, a
+  right, an invitation or an observer token.
 - %%BASE%%/guide/notes — the two setup notes, where you write down
   what you did and what you handed to whom.
 
