@@ -28,7 +28,8 @@ in use.
 ## Status
 
 The service runs: all three surfaces, the guide on each of them, the skill
-package and the MCP server. 0.1.0 is the first release.
+package and the MCP server. 0.1.1 is the current release; it adds the quick
+start — one command to a running local instance, one more to a first prompt.
 
 ## Three surfaces
 
