@@ -32,40 +32,47 @@ hands work to agents in several tools and collects the answers.
 
 ## Try it quickly
 
-One command starts the image on your machine, reachable from this machine
-only. Linux, with podman or docker:
+Two commands per operating system. The first starts the image on your
+machine, reachable from this machine only. The second prints a first prompt
+for your agent — with the instance's administration secret in it, and where
+that secret may go. Paste it into the agent, and it asks you for the names,
+creates a realm and a team and hands you the invitations.
+
+### Linux, with podman or docker
 
 ```sh
 podman run -d --name simple-a2a -p 127.0.0.1:8251:8251 -p 127.0.0.1:8252:8252 -p 127.0.0.1:8253:8253 -v simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
+podman exec simple-a2a simple-a2a first-prompt
 ```
 
-Windows, in PowerShell, with WSL containers (`wslc` publishes on `127.0.0.1`
-unless told otherwise):
+With docker, `docker` in place of `podman` in both lines.
+
+### Windows, in PowerShell, with WSL containers
 
 ```powershell
 wslc run -d --name simple-a2a -p 8251:8251 -p 8252:8252 -p 8253:8253 -v simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
+wslc exec simple-a2a simple-a2a first-prompt
 ```
 
-macOS, with Apple `container` (or the Linux line with docker or podman):
+`wslc` publishes on `127.0.0.1` unless told otherwise.
+
+### macOS, with Apple `container`
 
 ```sh
 container run -d --name simple-a2a --publish 127.0.0.1:8251:8251 --publish 127.0.0.1:8252:8252 --publish 127.0.0.1:8253:8253 --volume simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
+container exec simple-a2a simple-a2a first-prompt
 ```
 
-A second command prints a first prompt for your agent — with the instance's
-administration secret in it, and where that secret may go. Paste it into the
-agent, and it asks you for the names, creates a realm and a team and hands you
-the invitations:
+With docker or podman on macOS, the Linux lines.
 
-```sh
-podman exec simple-a2a simple-a2a first-prompt     # or docker / wslc / container exec
-```
+### The quick start in detail
 
 This is for trying it out: no TLS, no restart after a reboot; the volume keeps
 the messages and the secret. [`docs/quick-start.md`](docs/quick-start.md) has
-the rest — the variant for your own network, a port that is taken, WSL, what
-each engine needs, stopping and removing, and what was tested. For running it
-for good, see [`deploy/README.md`](deploy/README.md).
+the rest — what this form costs, the variant for your own network, what each
+engine needs, whether it is up, a port that is taken, WSL, stopping and
+removing, and what was tested. For running it for good, see
+[`deploy/README.md`](deploy/README.md).
 
 ## Status
 
@@ -162,6 +169,10 @@ message names the parameter.
   surface on a host name of its own and TLS at the proxy, plus the variant
   without a proxy and what it costs. Its README says what an operator needs:
   the volume, the administration secret, switching a surface off.
+
+To try the image on one machine without any of that, see
+[Try it quickly](#try-it-quickly) above, with the details in
+[`docs/quick-start.md`](docs/quick-start.md).
 
 The package and the image are published only after `tools/smoke.py` has
 started each of them and driven it from outside: a bare start, the token-free

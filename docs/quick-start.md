@@ -46,8 +46,8 @@ to reach the instance from a WSL distribution in NAT mode, see [From a WSL distr
 
 ## Linux: podman or docker
 
-Replace `podman` with `docker` if that is what you have, here and in the
-README's line; the lines are otherwise the same.
+Replace `podman` with `docker` if that is what you have; the line is
+otherwise the same.
 
 Your own network:
 
@@ -77,8 +77,8 @@ one directory, which a Windows path shared into the container may not give it
 — [`../deploy/README.md`](../deploy/README.md), section "The data volume", has
 the filesystem requirement. Whether `wslc` makes a volume on first mention, and
 of which kind, its documentation does not say. If either `wslc run` line — the
-README's or the one above — refuses the volume as unknown, or the container stops with its log complaining about the
-data directory, remove the container and any volume `wslc` made under that
+README's or the one above — refuses the volume as unknown, or the container
+stops with its log complaining about the data directory, remove the container and any volume `wslc` made under that
 name, create the volume with the command above, and run that line again.
 
 ## macOS: Apple `container`, or docker and podman
@@ -110,12 +110,9 @@ engine).
 
 ## The second command: your first prompt
 
-```sh
-podman exec simple-a2a simple-a2a first-prompt
-```
-
-With another engine, `docker exec`, `wslc exec` or `container exec` in place
-of `podman exec`. The command runs inside the container and prints, in English,
+The second line of each pair in the README —
+`podman exec simple-a2a simple-a2a first-prompt` or its counterpart for your
+engine — runs inside the container and prints, in English,
 a prompt for your agent: connect to the administration surface at
 `http://127.0.0.1:8252`, read its self-description first, create a realm and a
 team, hand the invitations back — and the administration secret of this
@@ -191,8 +188,8 @@ ever shrink.
 ## What was tested, and what was not
 
 The Linux form is the one the build itself runs: before the image is published,
-it is started with docker like the Linux line in the README — ports on the loopback address, a named
-volume on `/var/lib/simple-a2a` — and driven from outside by the smoke test,
+it is started with docker like the Linux line in the README — ports on the
+loopback address, a named volume on `/var/lib/simple-a2a` — and driven from outside by the smoke test,
 then started again on the same volume. `first-prompt` is tested in the
 suite, and was run against an instance started from this tree.
 
