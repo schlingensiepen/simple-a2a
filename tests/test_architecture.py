@@ -105,16 +105,34 @@ def test_all_seven_blocks_are_there() -> None:
     assert not extra, f"a directory beside the seven blocks: {sorted(extra)}"
 
 
-def test_the_only_modules_outside_the_blocks_are_the_two_entry_points() -> None:
-    """Two modules live beside the blocks, and both are entry points.
+def test_the_only_modules_outside_the_blocks_are_the_three_entry_points() -> None:
+    """Three modules live beside the blocks, and each one is a way in from outside.
 
     `__main__` is the service, `probe` is the image asking itself whether it is
-    healthy. Both may know what HTTP is, because that is their whole job — which
-    is exactly why a third module appearing here should have to be noticed.
+    healthy, and `first_prompt` is the one helper — it prints the first prompt for
+    an agent, with the secret the service settled. None of them is a block: the
+    first two may know what HTTP is because that is their whole job, and the third
+    reads the secret and writes to standard output, which belongs to no block
+    either. A fourth module appearing here should have to be noticed, as the
+    third one was.
     """
     modules = {p.stem for p in SRC.glob("*.py")}
 
-    assert modules == {"__init__", "__main__", "probe"}
+    assert modules == {"__init__", "__main__", "probe", "first_prompt"}
+
+
+def test_the_helper_reads_the_secret_and_knows_nothing_else() -> None:
+    """`first_prompt` reaches `core` and nothing above it.
+
+    It prints a text with the secret in it; a helper that imported a surface, the
+    holdings or the operations would be a second way to do something to the
+    service, and there is deliberately only one — the surfaces themselves.
+    """
+    names = imported_modules(SRC / "first_prompt.py")
+    reached = {name for name in names if name.startswith("simple_a2a.")}
+
+    assert reached and all(name.startswith("simple_a2a.core") for name in reached), reached
+    assert not any(name.split(".")[0] in HTTP_NAMES for name in names), names
 
 
 @pytest.mark.parametrize("block", NO_HTTP)

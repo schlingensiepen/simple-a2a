@@ -145,3 +145,59 @@ def test_asking_for_a_new_one_replaces_the_stored_one(
     assert second.origin == secret.Origin.GENERATED
     assert layout.admin_secret.read_text(encoding="utf-8").strip() == second.value
     assert len([line for line in caplog.records if second.value in line.getMessage()]) == 1
+
+
+# --- find: the read-only half ---------------------------------------------------
+
+
+def test_find_reads_the_same_places_in_the_same_order(layout: Layout) -> None:
+    """Environment over file, as at the start, so that a process beside the service
+    names the secret the service is using."""
+    layout.admin_secret.write_text("f" * 40, encoding="utf-8")
+
+    assert secret.find(config.load({config.ADMIN_SECRET: "e" * 40}), layout) == secret.Secret(
+        value="e" * 40, origin=secret.Origin.ENVIRONMENT
+    )
+    assert secret.find(config.load({}), layout) == secret.Secret(
+        value="f" * 40, origin=secret.Origin.FILE
+    )
+
+
+def test_find_never_generates_and_never_writes(layout: Layout) -> None:
+    """Only the process that serves may mint a secret; a second one would mint a
+    value the service never sees. Not a file, and not a mode either."""
+    assert secret.find(config.load({}), layout) is None
+    assert not layout.admin_secret.exists()
+
+    layout.admin_secret.write_text("g" * 40, encoding="utf-8")
+    os.chmod(layout.admin_secret, 0o644)
+    found = secret.find(config.load({}), layout)
+
+    assert found is not None and found.value == "g" * 40
+    assert stat.S_IMODE(layout.admin_secret.stat().st_mode) == 0o644
+
+
+def test_find_treats_the_request_for_a_new_one_as_no_secret(layout: Layout) -> None:
+    """`new` is a request, not a value: the file is what counts, because the service
+    has already replaced it at its start by the time anyone asks."""
+    layout.admin_secret.write_text("h" * 40, encoding="utf-8")
+
+    found = secret.find(config.load({config.ADMIN_SECRET: config.REGENERATE}), layout)
+
+    assert found is not None and found.value == "h" * 40
+
+
+def test_find_with_administration_off_finds_nothing(layout: Layout) -> None:
+    layout.admin_secret.write_text("i" * 40, encoding="utf-8")
+
+    assert secret.find(config.load({config.ADMIN_PORT: ""}), layout) is None
+
+
+def test_find_holds_the_file_to_the_same_minimum(layout: Layout) -> None:
+    """The same rule as at the start; a helper that accepted what the service refuses
+    would name a secret the service never used."""
+    layout.admin_secret.write_text("short", encoding="utf-8")
+
+    with pytest.raises(config.ConfigError) as caught:
+        secret.find(config.load({}), layout)
+    assert caught.value.parameter == config.ADMIN_SECRET

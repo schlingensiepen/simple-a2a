@@ -1,9 +1,16 @@
 """The one entry point: the service itself.
 
 There is no command line for operations. Everything an operator does goes either
-through the three surfaces or through the means of their host, so this takes no
-subcommand and no argument — it reads the environment, opens the data directory,
-determines the administration secret and serves.
+through the three surfaces or through the means of their host, so a bare start
+takes nothing — it reads the environment, opens the data directory, determines the
+administration secret and serves. That bare start is what the image runs.
+
+One word is understood beside it: `simple-a2a first-prompt` prints the first
+prompt for an agent, with the administration secret in it, and does not start the
+service. It is a helper, not an operation — it reads the secret the way the start
+reads it and changes nothing — and it lives in `first_prompt`, with its reasons.
+Anything else on the command line is refused rather than served: a misspelt
+helper that quietly started a second service would be a puzzle, not a start.
 
 **One process, one binding, three ports.** Not three processes: they would share the
 data directory, and three writers on one directory would be three writers for no
@@ -26,7 +33,7 @@ import sys
 
 import uvicorn
 
-from simple_a2a import __version__
+from simple_a2a import __version__, first_prompt
 from simple_a2a.admin.app import build_app as build_admin
 from simple_a2a.core import config, secret
 from simple_a2a.core.paths import Layout as SecretLayout
@@ -122,7 +129,19 @@ async def serve(running: list[uvicorn.Server]) -> None:
             group.create_task(server.serve())
 
 
-def main() -> int:
+def main(arguments: list[str] | None = None) -> int:
+    given = sys.argv[1:] if arguments is None else arguments
+    if given and given[0] == first_prompt.SUBCOMMAND:
+        return first_prompt.main(given[1:])
+    if given:
+        print(
+            f"simple-a2a takes no arguments; a bare start serves. The one word understood is "
+            f"{first_prompt.SUBCOMMAND!r}, which prints the first prompt for an agent and "
+            f"starts nothing — {first_prompt.USAGE}",
+            file=sys.stderr,
+        )
+        return 2
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     try:
         resolved = config.load()

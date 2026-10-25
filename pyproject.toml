@@ -24,8 +24,10 @@ dependencies = [
 dev = ["pytest", "httpx", "ruff"]
 
 [project.scripts]
-# The service itself, without a subcommand: there is no command line for
-# operations, and the image's entry point is this one.
+# The service itself: a bare start serves, and the image's entry point is this
+# one. There is no command line for operations; the one word understood beside
+# the bare start is `first-prompt`, a helper that prints the first prompt for an
+# agent and reads nothing but the administration secret.
 simple-a2a = "simple_a2a.__main__:main"
 
 # The MCP program lives outside the package — it imports nothing from it — and is

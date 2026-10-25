@@ -1,8 +1,9 @@
 """The image's own health probe: every surface that is configured answers.
 
 This is what the image's health check runs. It is not a command line for the
-operator — there is none — it is the container asking itself the one question a
-container platform needs answered: should this be restarted.
+operator — there is none for operations; the one helper beside the service is
+`simple-a2a first-prompt`, and it only prints — it is the container asking itself
+the one question a container platform needs answered: should this be restarted.
 
 Two things it deliberately does:
 

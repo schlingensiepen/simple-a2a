@@ -26,6 +26,13 @@ person who needs to know.
 **An unreadable secret file stops the start.** A service that came up without
 administration because a file could not be read would be worse than one that
 refuses: the first looks healthy and has no way in.
+
+Two functions, because two callers want two different things. `resolve` is the
+service at its start: it settles the secret, generating one if it has to. `find`
+is everybody else — in practice `simple-a2a first-prompt`, run beside the
+service — and it only reads: the same two places, in the same order, and never
+step 3. Only the process that serves may mint a secret, or two processes would
+disagree about which one is in force.
 """
 
 from __future__ import annotations
@@ -102,16 +109,23 @@ def _generate(layout: Layout) -> Secret:
     return Secret(value=value, origin=Origin.GENERATED)
 
 
-def resolve(config: Config, layout: Layout) -> Secret | None:
-    """The secret in use, or `None` when administration is off."""
+def find(config: Config, layout: Layout) -> Secret | None:
+    """The secret that is already settled — environment, then file — or `None`.
+
+    Steps 0 to 2 of the order above, and nothing of step 3: this reads, and it
+    writes nothing, not even a file mode. It is the half of `resolve` that a
+    process beside the running service may use — `simple-a2a first-prompt` asks
+    it which secret the service is using — because a second process that could
+    *settle* a secret would be a second writer on the one file, and would mint a
+    value the service never sees.
+
+    `None` means there is none to be found: administration is off, or nothing
+    has been generated yet. The request for a new one (`SIMPLE_A2A_ADMIN_SECRET=new`)
+    is not a secret, so with it set the file is what counts — by the time anyone
+    asks, the service has already replaced it at its start.
+    """
     if not config.administration_is_on:
         return None
-
-    if config.regenerate_admin_secret:
-        # Asked for on purpose, so an existing file is replaced rather than
-        # read. This is the way back for an operator who missed the line and
-        # cannot get into the container to read the file.
-        return _generate(layout)
 
     if config.admin_secret is not None:
         # Already length-checked while the configuration was read; checked again
@@ -122,13 +136,36 @@ def resolve(config: Config, layout: Layout) -> Secret | None:
     from_file = _read_file(layout.admin_secret)
     if from_file is not None:
         _check_length(from_file, where=f"file {layout.admin_secret}")
-        # The file may have been placed by the operator with wide permissions.
-        # Narrowing it is silent on purpose: refusing to start over a mode we
-        # can simply fix would be a mandatory setting in disguise.
-        try:
-            os.chmod(layout.admin_secret, atomic.PRIVATE_MODE)
-        except OSError:
-            pass
         return Secret(value=from_file, origin=Origin.FILE)
+
+    return None
+
+
+def resolve(config: Config, layout: Layout) -> Secret | None:
+    """The secret in use, or `None` when administration is off.
+
+    What the service calls at its start: `find`, and where that finds nothing,
+    generation. The one process that may settle the secret is the one that serves.
+    """
+    if not config.administration_is_on:
+        return None
+
+    if config.regenerate_admin_secret:
+        # Asked for on purpose, so an existing file is replaced rather than
+        # read. This is the way back for an operator who missed the line and
+        # cannot get into the container to read the file.
+        return _generate(layout)
+
+    found = find(config, layout)
+    if found is not None:
+        if found.origin == Origin.FILE:
+            # The file may have been placed by the operator with wide permissions.
+            # Narrowing it is silent on purpose: refusing to start over a mode we
+            # can simply fix would be a mandatory setting in disguise.
+            try:
+                os.chmod(layout.admin_secret, atomic.PRIVATE_MODE)
+            except OSError:
+                pass
+        return found
 
     return _generate(layout)

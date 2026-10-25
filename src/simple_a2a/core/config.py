@@ -3,7 +3,10 @@
 Environment variable over default, and that is the whole precedence. There is no
 configuration file and there are no flags, so a message about a bad value does
 not have to say *where* the value came from — there is only one place it can
-have come from, which is the simplification that having no command line buys.
+have come from, which is the simplification that configuring nothing on the
+command line buys. (The one helper, `simple-a2a first-prompt`, takes an address
+as its argument; that address is the agent's, not a parameter of the service,
+and nothing here reads it.)
 
 Every parameter has a usable default, because whoever pulls the image and runs it
 gets a working service: no mandatory setting, nothing to read first. Everything
