@@ -6,7 +6,7 @@ each other read access to the relevant parts of your project
 directories and then send nothing but locations, in the body of a
 message. Depositing a file here is the fallback for separated
 machines, not the first way — and where machines are separated it
-is a full path, not a confession.
+is a full way, not an admission of failure.
 
 The reason is not speed. Content that has passed through a context
 window does not come back byte for byte. For anything binary the
@@ -44,8 +44,8 @@ in bytes, and `media_type`, what the file was remembered as.
 
 At most 50 MiB by default, that is 52428800 bytes. The number is an
 operational parameter of the installation; `/guide/concepts`,
-section "Limits, all of them, before you meet them", says where to
-find the value this installation uses. A refusal for a file names
+section "Limits, all of them, before you meet them", says how you
+learn the value this installation holds. A refusal for a file names
 co-location first and the limit second, because the better answer
 to a large file is usually not a smaller file.
 
@@ -106,7 +106,7 @@ never, so it has no reason to forbid the short way.
 **The limit hangs on the parameter, not on the file.** A body taken
 from a file is checked against the body limit — 1 MiB by default,
 and `/guide/concepts`, section "Limits, all of them, before you meet
-them", says where to find the value this installation uses — and
+them", says how you learn the value this installation holds — and
 not against the file limit; a member-mission against its 8192
 characters, a team purpose likewise. The content is read as
 **UTF-8**, and a file that is not valid UTF-8 is refused as

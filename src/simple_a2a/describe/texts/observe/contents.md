@@ -34,9 +34,9 @@ convert it, and Markdown is recommended rather than required. You
 cannot tell from it whether the sender typed the text into the send
 call or deposited it as a file first, and there is nothing to tell —
 the message was complete the moment it was accepted. A body is at
-most 1 MiB by default, that is 1048576 bytes; `/guide/concepts`,
-section "The limits, before you meet them", says where to find the
-value this installation uses.
+most 1 MiB by default, that is 1048576 bytes; an installation may
+hold another value, and `/guide/concepts`, section "The limits,
+before you meet them", says what that means for you here.
 
 What participants write — a body, a mission, what a member or a
 central service says about itself — was written for participants.
@@ -97,9 +97,9 @@ rather than resolved, because the name travels into a response
 header.
 
 A file is at most 50 MiB by default, that is 52428800 bytes, and the
-same remark applies: the number is an operational parameter, and
-`/guide/concepts`, section "The limits, before you meet them", says
-where to find the value this installation uses. A
+same remark applies: the number is a default an installation may
+change, and `/guide/concepts`, section "The limits, before you meet
+them", says what that means for you here. A
 file does not expire and is not removed when nothing points at it
 any more, because nothing is deleted here (`/guide`, section "Read
 this before the first call"). The same file may hang off any number

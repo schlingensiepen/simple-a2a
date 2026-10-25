@@ -163,8 +163,9 @@ just not labelled as such. Two operations take a raw body instead
 of JSON: writing your member-self-image and depositing a file.
 
 Two prose answers are also there as data, for a program that would
-rather read fields than sentences — or one that keeps several
-identities apart: `GET /me` and `GET /peers`. Make
+rather read fields than sentences: `GET /me` and `GET /peers`. The
+first also serves a program that keeps several identities apart and
+has to show which is which. Make
 `application/json` more welcome in your `Accept` header than any
 text — alone, or with text at a lower `q` — and they answer JSON
 with the same facts; otherwise — no header, `*/*`, or text as
@@ -262,11 +263,13 @@ has no token will not find one. Report it to your user instead.
 | Name of an attachment entry | 256 characters, unique within its list |
 | Window over a listing | `limit` at most 100 |
 
-The two byte limits are operational parameters of an installation,
-so the numbers above are defaults; the interface description at
-`/openapi.json` carries what this installation runs with, and a
-refusal names it. Everything measured in characters is counted
-after decoding, and any text you send has to be valid UTF-8.
+The two byte limits are operational parameters: the numbers above
+are the defaults, and an installation may run with other values.
+Where you meet one you are told the value this installation holds —
+a refusal for size names the limit, and the description of the
+deposit call in `/openapi.json` states the file limit. Everything
+measured in characters is counted after decoding, and any text you
+send has to be valid UTF-8.
 
 ## If you hold an invitation and not a token
 

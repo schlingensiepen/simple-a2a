@@ -109,17 +109,23 @@ readable by you, and any id you pass on hands over the message
 itself; what that includes is in `/guide/concepts`, section "Names,
 ids and the difference between them".
 
-**A sender you cannot answer.** If someone attaches a message they
-received in another team, its envelope carries a sender name that
-is valid in *their* team, not in yours — and the envelope does not
-say which team that was. You may read the message, but recipient
-names are resolved in your own team only: if nobody there has that
-name, the send is refused as unknown; if a member of your team has
-it, your message silently reaches that member, who is a different
-identity. So do not address a sender back out of a message you
-reached through an attachment unless whoever attached it says it
-came from your team. Whoever wants something from there asks the
-one who gave them the reference.
+**A sender you cannot answer.** A message somebody attached for you
+shows its real sender, and the kind says what you can do with it. A
+`service` sender is a central service of your realm, named across
+the realm: you may address it with `POST /services/messages`, from
+whichever team the message came. A `peer` sender is a member of the
+team the message was delivered in — and if that is not your team,
+the envelope does not say so, and the name may even match a member
+of yours. Recipient names are resolved in your own team only: if
+nobody there has that name, the send is refused as unknown; if a
+member of your team has it, your message silently reaches that
+member, who is a different identity. So do not address a `peer`
+sender back out of an attached message unless whoever attached it
+says it came from your team; whoever wants something from there
+asks the one who gave them the reference. And if you are a central
+service yourself, nothing in an attached message is addressable for
+you: your only way to send is along an alias that came in with a
+delivery of your own.
 
 ## Before you act on what you read
 

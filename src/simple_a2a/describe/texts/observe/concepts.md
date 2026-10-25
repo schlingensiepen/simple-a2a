@@ -150,11 +150,12 @@ list.
 | Name of an attachment entry | 256 characters, unique within its list |
 | Window over a listing | `limit` at most 100 |
 
-The two byte limits are operational parameters of an installation, so
-those two numbers are defaults; the interface description at
-`/openapi.json` carries what this installation runs with. They matter
-to you as the worst case of what one entry can weigh: an envelope
-tells you the body size and the total size before you fetch anything.
+The two byte limits are operational parameters: those two numbers
+are the defaults, and an installation may run with other values.
+Nothing on this surface states which it holds, because you neither
+send nor deposit here. They matter to you as the worst case of what
+one entry can weigh: an envelope tells you the body size and the
+total size before you fetch anything.
 
 ## Success and refusal
 
