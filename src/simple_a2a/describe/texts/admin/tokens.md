@@ -116,8 +116,9 @@ than an honestly kept right, and a right does not sit in a string
 you can hand out. It permits two things: obtaining an invitation for
 a central service, and appointing further realm masters inside one's
 own team. An invitation for a central service is not issued here:
-whoever holds the right obtains it with their own token. Every token
-you obtain from this administration carries it.
+whoever holds the right obtains it with their own token. Every
+identity that comes from redeeming an invitation obtained here
+carries it.
 
 Appointing happens inside a team, by someone who already has the
 right. Removing it happens only here. The asymmetry is deliberate:

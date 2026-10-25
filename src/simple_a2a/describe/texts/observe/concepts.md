@@ -100,8 +100,8 @@ error.
 Data is `application/json; charset=utf-8`. Prose and raw are
 negotiated: with `text/markdown` in the `Accept` list of your request
 you get that, otherwise `text/plain; charset=utf-8` — the same text,
-just not labelled as Markdown. A file comes with the media type
-derived from the extension of the name in the address you used.
+just not labelled as Markdown. A file comes with the media type it
+was deposited with; `/guide/contents` says how that is decided.
 
 Two prose answers are also there as data, for a program that would
 rather read fields than sentences: `GET /teams` and

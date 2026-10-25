@@ -43,15 +43,15 @@ contain spaces.
 - `GET /teams/{team}/peers/{name}` — one member: name, whether realm
   master, whether revoked, the same moments, and the addresses of the
   two texts.
-
-A moment the installation did not keep — the right given or taken
-before it began to record that — is `null` in the data and "not
-recorded" in the prose. It is never filled in with a guess.
 - `GET /teams/{team}/peers/{name}/mission` — their member-mission,
   raw: what they were brought in for, set when they joined and static
   since.
 - `GET /teams/{team}/peers/{name}/self` — their member-self-image,
   raw: what they say they actually do. Empty until they set one.
+
+A moment the installation did not keep — the right given or taken
+before it began to record that — is `null` in the data and "not
+recorded" in the prose. It is never filled in with a guess.
 
 ## The central services of the realm
 

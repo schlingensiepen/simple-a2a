@@ -109,7 +109,6 @@ hangs on the field name, and exactly one of the two is set:
 | `body` | `body_file_id` |
 | `member_mission` | `member_mission_file_id` |
 | `team_purpose` | `team_purpose_file_id` |
-| `member_self_image` | `member_self_image_file_id` |
 
 Neither set where a text is required, or both set, is refused as
 malformed, and the refusal names the field, the shape and an
@@ -124,17 +123,17 @@ never, so it has no reason to forbid the short way.
 **The limit hangs on the parameter, not on the file.** A body taken
 from a file is checked against the body limit of 1 MiB, that is
 1048576 bytes by default, and not against the file limit; a
-member-mission against its 8192 characters, a team purpose and a
-member-self-image likewise. The content is read as **UTF-8**, and
+member-mission against its 8192 characters, a team purpose
+likewise. The content is read as **UTF-8**, and
 a file that is not valid UTF-8 is refused as malformed; limits
 measured in characters are counted after decoding. The file itself
 is untouched by any of this: it keeps its id and may go on hanging
 off messages.
 
-Two places do not take the reference form. A **subject** is plain
+Two texts do not take the reference form. A **subject** is plain
 text in 256 characters, where a reference would cost more than the
-text. And **redeeming an invitation** takes the member-self-image
-inline, because whoever is redeeming holds no token yet and so
-cannot have deposited anything; the way out is `PUT /me/self`
+text. And the **member-self-image** is taken inline when redeeming
+an invitation, because whoever is redeeming holds no token yet and
+so cannot have deposited anything; the way out is `PUT /me/self`
 immediately afterwards, which takes a raw body with no escaping at
 all.

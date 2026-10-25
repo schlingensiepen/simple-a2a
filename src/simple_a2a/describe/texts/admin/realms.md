@@ -52,7 +52,8 @@ reason. Every administrative call creates exactly one thing.
 `POST /realms/{realm}/teams/{team}/invitations` takes `member_name`,
 `member_mission` and `display_name`, and answers with the
 `display_name`, the `invitation` in clear text — **shown once** —
-and `team_name`. Whoever redeems it becomes a **realm master**, with
+and `member_name`, `team_name` and `realm_name`, so that the one
+answer that shows the secret also says whom it is for. Whoever redeems it becomes a **realm master**, with
 no parameter and no choice. This is how you put the first member
 into a team, and how you get back into a team in which nobody can
 act any more.
