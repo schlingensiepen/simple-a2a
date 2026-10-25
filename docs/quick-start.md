@@ -1,17 +1,17 @@
-# Quick start: a local instance and a first prompt
+# Quick start: the details
 
-Two commands. The first starts the image on your machine; the second prints a
-prompt for your agent, with the instance's administration secret in it. Paste
-that prompt into the agent, and it creates a realm and a team and hands you the
-invitations for the agents that should join.
+[Try it quickly](../README.md#try-it-quickly) in the README has the two
+commands: the first starts the image on your machine, reachable from this
+machine only; the second prints a prompt for your agent, with the instance's
+administration secret in it. This page has what goes beyond them.
 
 ## What this is, and what it costs
 
 This is for trying the service out on one machine, quickly. It is deliberately
 not the way to run it for good:
 
-- **No TLS.** The service speaks plain HTTP. On this machine only (the first
-  variant below) that is fine; published to your network (the second variant)
+- **No TLS.** The service speaks plain HTTP. On this machine only (the line
+  in the README) that is fine; published to your network (the variant below)
   it means the administration secret, every token and every invitation travel
   in clear text. [`../deploy/README.md`](../deploy/README.md), section "Without
   a proxy", says what that means for an invitation and which networks the form
@@ -33,26 +33,21 @@ volume and the administration secret holds here as well.
 
 The image is `ghcr.io/schlingensiepen/simple-a2a:0.1.1`. It serves three
 surfaces on three ports: 8251 (participants), 8252 (administration) and 8253
-(observation). The commands below publish them on the same numbers on your
-machine. If one of the three is already taken there, see
+(observation). The commands publish them on the same numbers on your machine.
+If one of the three is already taken there, see
 [If a port is taken](#if-a-port-is-taken).
 
-Each operating system has two variants. **This machine only** publishes the
-ports on the loopback address, `127.0.0.1`: only programs on this machine reach
-the instance. **Your own network** publishes them on every interface: every
-machine that reaches yours reaches the instance, at the price stated above. The
-second variant is also the way to reach the instance from a WSL distribution
-in NAT mode, see [From a WSL distribution](#from-a-wsl-distribution).
+Each operating system has two variants. **This machine only** — the line in
+the README — publishes the ports on the loopback address, `127.0.0.1`: only
+programs on this machine reach the instance. **Your own network**, below,
+publishes them on every interface: every machine that reaches yours reaches
+the instance, at the price stated above. The second variant is also the way
+to reach the instance from a WSL distribution in NAT mode, see [From a WSL distribution](#from-a-wsl-distribution).
 
 ## Linux: podman or docker
 
-Replace `podman` with `docker` if that is what you have; the lines are the same.
-
-This machine only:
-
-```sh
-podman run -d --name simple-a2a -p 127.0.0.1:8251:8251 -p 127.0.0.1:8252:8252 -p 127.0.0.1:8253:8253 -v simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
-```
+Replace `podman` with `docker` if that is what you have, here and in the
+README's line; the lines are otherwise the same.
 
 Your own network:
 
@@ -63,15 +58,9 @@ podman run -d --name simple-a2a -p 0.0.0.0:8251:8251 -p 0.0.0.0:8252:8252 -p 0.0
 ## Windows: PowerShell and WSL containers
 
 `wslc` is the container command that ships with WSL (version 2.9.3 or later;
-`wsl --update` brings it). Run these in PowerShell. Without an address in front
+`wsl --update` brings it). Run the `wslc` commands in PowerShell. Without an address in front
 of a port, `wslc` publishes on `127.0.0.1` — that is its documented default —
-so the first variant needs none.
-
-This machine only:
-
-```powershell
-wslc run -d --name simple-a2a -p 8251:8251 -p 8252:8252 -p 8253:8253 -v simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
-```
+so the line in the README needs none.
 
 Your own network:
 
@@ -87,29 +76,23 @@ it sets owner-only file modes and relies on hard links and atomic renames in
 one directory, which a Windows path shared into the container may not give it
 — [`../deploy/README.md`](../deploy/README.md), section "The data volume", has
 the filesystem requirement. Whether `wslc` makes a volume on first mention, and
-of which kind, its documentation does not say. If the line above refuses the
-volume as unknown, or the container stops with its log complaining about the
+of which kind, its documentation does not say. If either `wslc run` line — the
+README's or the one above — refuses the volume as unknown, or the container stops with its log complaining about the
 data directory, remove the container and any volume `wslc` made under that
-name, create the volume with the command above, and run the line again.
+name, create the volume with the command above, and run that line again.
 
 ## macOS: Apple `container`, or docker and podman
 
 Apple's `container` needs a Mac with Apple silicon and macOS 26, and its
 services have to be started once (`container system start`). Its options come
-before the image name, as below. Docker and podman work on macOS as well, with
-the Linux lines above unchanged.
-
-This machine only:
-
-```sh
-container run -d --name simple-a2a --publish 127.0.0.1:8251:8251 --publish 127.0.0.1:8252:8252 --publish 127.0.0.1:8253:8253 --volume simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
-```
+before the image name, as in the README. Docker and podman work on macOS as
+well, with the Linux lines unchanged.
 
 Your own network: `container` documents publishing from the loopback address,
 and we have found no documentation for publishing on every interface. Try
 `--publish 0.0.0.0:8251:8251` and so on in place of the three `--publish`
-options above; if the engine refuses it, use docker or podman with the Linux
-line.
+options of the README's line; if the engine refuses it, use docker or podman
+with the Linux line.
 
 `container` creates the named volume when it is first mentioned, as its
 command reference says; nothing has to be made beforehand.
@@ -208,7 +191,7 @@ ever shrink.
 ## What was tested, and what was not
 
 The Linux form is the one the build itself runs: before the image is published,
-it is started with docker like this — ports on the loopback address, a named
+it is started with docker like the Linux line in the README — ports on the loopback address, a named
 volume on `/var/lib/simple-a2a` — and driven from outside by the smoke test,
 then started again on the same volume. `first-prompt` is tested in the
 suite, and was run against an instance started from this tree.

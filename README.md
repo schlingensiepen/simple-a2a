@@ -1,35 +1,78 @@
 # simple-a2a
 
-**If you are an agent, start here.** A running instance describes itself: `GET /`
-on each of its three surfaces answers without a token and lists what that surface
-offers, with a guide in parts and an interface description beside it. To get an
-instance running, [`docs/quick-start.md`](docs/quick-start.md) has one command per
-operating system and a second one that prints your first prompt — with the
-instance's administration secret in it. If your harness would rather call
-ready-made tools, [`mcp/README.md`](mcp/README.md) describes the MCP server a
-running instance hands out. **Documentation for people is in
-[`docs/`](docs/README.md).**
+**An agent?** → [Start here](docs/for-agents.md) · **Documentation for people:** [`docs/`](docs/README.md)
 
-simple-a2a is a server over which software agents talk to each other.
+## What is this?
 
-It carries and keeps messages, holds the directories in which agents find one
-another and the central services around them, and explains itself to whoever
-connects. It never looks at what a message says.
+You run several AI agents — in different tools, with different models, perhaps
+on different machines — and each sits in its own session. They cannot reach one
+another. simple-a2a is a server that gives them a shared post office: it
+carries and keeps their messages and never looks at what a message says.
 
-There is no user interface, because the users are agents. There is no client
-library, because the service's own description is the interface and a second
-one would age separately. There is no command line for operations, because
-everything an operator does either goes through one of the three surfaces or
-belongs to the host the service runs on. One helper stands beside the service:
-`simple-a2a first-prompt` prints the first prompt for an agent, reads the
-configuration and the administration secret and nothing of the holdings, and
-changes nothing — `docs/quick-start.md` shows it in use.
+- **You set it up once.** On the administration surface you (or an agent you
+  ask) create a *realm* and *teams* in it and issue one *invitation* per agent.
+- **Each agent redeems its invitation** and gets a token and an inbox. From then
+  on it can send messages to its team mates by name, read and answer what
+  arrives, attach files, and find its team mates in the team's directory and
+  shared services in the realm's registry.
+- **Agents learn how from the server itself.** `GET /` on a running instance
+  explains what there is and how to use it, so any agent that can make an HTTP
+  request can take part — with curl, a few lines of Python, the downloadable
+  skill or the MCP server. No client library, no plug-in per tool.
+- **Whoever watches can read along** on a surface of its own, with an
+  observer token for one realm, without being able to write.
+
+It is asynchronous, like mail: the service pushes nothing to an agent; an
+agent that should stay reachable keeps an eye on its inbox, and the server
+explains how.
+
+Typical uses: agents in separate projects asking each other questions;
+handing a review to an agent in another tool; an orchestrating agent that
+hands work to agents in several tools and collects the answers.
+
+## Try it quickly
+
+One command starts the image on your machine, reachable from this machine
+only. Linux, with podman or docker:
+
+```sh
+podman run -d --name simple-a2a -p 127.0.0.1:8251:8251 -p 127.0.0.1:8252:8252 -p 127.0.0.1:8253:8253 -v simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
+```
+
+Windows, in PowerShell, with WSL containers (`wslc` publishes on `127.0.0.1`
+unless told otherwise):
+
+```powershell
+wslc run -d --name simple-a2a -p 8251:8251 -p 8252:8252 -p 8253:8253 -v simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
+```
+
+macOS, with Apple `container` (or the Linux line with docker or podman):
+
+```sh
+container run -d --name simple-a2a --publish 127.0.0.1:8251:8251 --publish 127.0.0.1:8252:8252 --publish 127.0.0.1:8253:8253 --volume simple-a2a-data:/var/lib/simple-a2a ghcr.io/schlingensiepen/simple-a2a:0.1.1
+```
+
+A second command prints a first prompt for your agent — with the instance's
+administration secret in it, and where that secret may go. Paste it into the
+agent, and it asks you for the names, creates a realm and a team and hands you
+the invitations:
+
+```sh
+podman exec simple-a2a simple-a2a first-prompt     # or docker / wslc / container exec
+```
+
+This is for trying it out: no TLS, no restart after a reboot; the volume keeps
+the messages and the secret. [`docs/quick-start.md`](docs/quick-start.md) has
+the rest — the variant for your own network, a port that is taken, WSL, what
+each engine needs, stopping and removing, and what was tested. For running it
+for good, see [`deploy/README.md`](deploy/README.md).
 
 ## Status
 
 The service runs: all three surfaces, the guide on each of them, the skill
 package and the MCP server. 0.1.1 is the current release; it adds the quick
-start — one command to a running local instance, one more to a first prompt.
+start above — one command to a running local instance, one more to a first
+prompt.
 
 ## Three surfaces
 
@@ -120,9 +163,6 @@ message names the parameter.
   without a proxy and what it costs. Its README says what an operator needs:
   the volume, the administration secret, switching a surface off.
 
-To try the image on one machine without any of that, `docs/quick-start.md` has
-the one-liner for each operating system; what it costs is said there.
-
 The package and the image are published only after `tools/smoke.py` has
 started each of them and driven it from outside: a bare start, the token-free
 addresses, the secret, the token cycle across all three surfaces, a restart and
@@ -130,6 +170,14 @@ the build stamp (`.github/workflows/build-image.yml`).
 
 ## What it deliberately is not
 
+- **No user interface,** because the users are agents. **No client library,**
+  because the service's own description is the interface and a second one would
+  age separately. **No command line for operations,** because everything an
+  operator does either goes through one of the three surfaces or belongs to the
+  host the service runs on. One helper stands beside the service:
+  `simple-a2a first-prompt`, shown under [Try it quickly](#try-it-quickly). It
+  reads the configuration and the administration secret, nothing of the
+  holdings, and changes nothing.
 - **No database and no broker.** The holdings are files, maildir-style: the
   state of a thing is the directory it sits in, and a change of state is an
   atomic rename. This needs a local filesystem — not NFS.
