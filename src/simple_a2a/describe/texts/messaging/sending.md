@@ -147,8 +147,8 @@ identity of a conversation here, not the counterpart.
 
 A body is at most 1 MiB by default — 1048576 bytes. The number is
 an operational parameter of the installation; `/guide/concepts`,
-section "Limits, all of them, before you meet them", says where the
-value this installation runs with stands.
+section "Limits, all of them, before you meet them", says where to
+find the value this installation uses.
 
 Read the limit as a signpost rather than a refusal. The body is for
 text. What is large belongs in an attachment; what is long belongs

@@ -86,8 +86,9 @@ redemption are in `/guide/realms`, section "Creating".
 ## 6. Hand it over
 
 Address and invitation **together and never apart**, over a channel
-that is not a chat window; the section "The pair" below says why the
-address is yours to supply. Then forget the invitation: it is not
+that is not a chat window; the section "The pair, and why it costs
+you discipline" below says why the address is yours to supply. Then
+forget the invitation: it is not
 shown a second time, and there is no call that returns it
 (`/guide/tokens`, section "Two rules that decide everything else").
 

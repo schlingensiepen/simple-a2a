@@ -69,6 +69,10 @@ revocation takes effect immediately.
 | `DELETE /realms/{realm}/invitations/{display_name}` | an invitation; answers `display_name`, `revoked`, `revoked_at` |
 | `DELETE /realms/{realm}/observer-tokens/{display_name}` | an observer token; answers `display_name`, `token_revoked`, `revoked_at` |
 
+Names in these addresses are percent-encoded, since a name may
+contain spaces (`/guide/realms`, section "Names, and why a collision
+is refused rather than reused").
+
 **The verb says take away, not delete.** A revocation ends a
 permission, not a thing. The entry stays, with its mark and its
 timestamp, and it stays readable — messages from a revoked identity

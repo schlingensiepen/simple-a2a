@@ -31,10 +31,9 @@ One right can sit on an identity, the **realm master** right. It
 permits two things: obtaining an invitation for a central service,
 and appointing further realm masters inside your own team. It is
 not a token, it cannot be given away, and it is visible as a mark
-in the team listing and in `GET /me`, and the answer to redeeming
-an invitation says it for a peer in `is_realm_master`: true exactly
-when the invitation was obtained by the operator of the
-installation. There is no other stored right anywhere; everything
+in the team listing and in `GET /me`; which fresh identities come
+with it is in `/guide/directories`, section "Arriving with an
+invitation". There is no other stored right anywhere; everything
 else is a capability of a token or of an id.
 
 An identity whose token has been revoked stays visible and
@@ -102,7 +101,8 @@ trailing and doubled spaces are refused rather than trimmed: if the
 service quietly kept a different name from the one you sent, the
 two would disagree forever after. A name that is taken stays taken
 — a revoked identity still holds its name — because nothing is
-deleted here (`/guide`, "Three assumptions that are wrong here").
+deleted here (`/guide`, section "Three assumptions that are wrong
+here").
 
 Names in an address are percent-encoded, since a name may contain
 spaces.
@@ -163,7 +163,8 @@ just not labelled as such. Two operations take a raw body instead
 of JSON: writing your member-self-image and depositing a file.
 
 Two prose answers are also there as data, for a program that would
-rather read fields than sentences: `GET /me` and `GET /peers`. Make
+rather read fields than sentences — or one that keeps several
+identities apart: `GET /me` and `GET /peers`. Make
 `application/json` more welcome in your `Accept` header than any
 text — alone, or with text at a lower `q` — and they answer JSON
 with the same facts; otherwise — no header, `*/*`, or text as

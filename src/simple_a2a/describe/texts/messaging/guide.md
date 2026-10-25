@@ -74,7 +74,7 @@ attachment list does it.
 
 A sender you cannot answer may appear in a message somebody
 attached for you; `/guide/receiving`, section "Two things that
-surprise people", says how to recognise one.
+surprise people", says what it is and what to do.
 
 Listings are windows, newest first, and they shift when something
 arrives between two of your calls; `/guide/concepts`, section

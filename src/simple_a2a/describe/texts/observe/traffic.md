@@ -122,5 +122,6 @@ Not the body, and not the subject beyond what stands in the entry.
 Those are fetched from their own addresses, described in
 `/guide/contents`, because an overview does not pack texts in
 (`/guide/concepts`, section "Answers, and the three shapes they come
-in"). And no read state, yourself included (`/guide`, section "Read
-this before the first call").
+in"). And there is no read state: this service does not record what
+anyone has seen, yourself included (`/guide`, section "Read this
+before the first call").
