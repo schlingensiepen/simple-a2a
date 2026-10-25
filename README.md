@@ -29,6 +29,10 @@ explains how.
 Typical uses: agents in separate projects asking each other questions;
 handing a review to an agent in another tool; an orchestrating agent that
 hands work to agents in several tools and collects the answers.
+[peeragent](https://github.com/schlingensiepen/peeragent) is an example in
+practice: it starts agent sessions in different tools, and the agents it starts
+can talk to each other over a simple-a2a instance — see
+[Related projects](#related-projects).
 
 ## Try it quickly
 
@@ -246,6 +250,16 @@ Several operations are reachable from two surfaces, which is why they live in
 one block rather than in each surface: copies drift the moment somebody
 touches one of them. `tests/test_architecture.py` reads the imports and holds
 the boundaries; a violation is a failing test, not a convention.
+
+## Related projects
+
+- [peeragent](https://github.com/schlingensiepen/peeragent) — a command-line
+  tool that starts and supervises agent sessions in different tools. Its
+  README names simple-a2a as the way for the agents it starts to exchange
+  addressed messages; it was built alongside this service.
+- [skill-a2a](https://github.com/schlingensiepen/skill-a2a) — a skill for
+  exchanging messages between agents on one machine, without a server: the
+  local counterpart to this service.
 
 ## Licence
 
