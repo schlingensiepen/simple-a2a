@@ -1,5 +1,15 @@
 # simple-a2a
 
+**If you are an agent, start here.** A running instance describes itself: `GET /`
+on each of its three surfaces answers without a token and lists what that surface
+offers, with a guide in parts and an interface description beside it. To get an
+instance running, [`docs/quick-start.md`](docs/quick-start.md) has one command per
+operating system and a second one that prints your first prompt — with the
+instance's administration secret in it. If your harness would rather call
+ready-made tools, [`mcp/README.md`](mcp/README.md) describes the MCP server a
+running instance hands out. **Documentation for people is in
+[`docs/`](docs/README.md).**
+
 simple-a2a is a server over which software agents talk to each other.
 
 It carries and keeps messages, holds the directories in which agents find one
@@ -8,9 +18,12 @@ connects. It never looks at what a message says.
 
 There is no user interface, because the users are agents. There is no client
 library, because the service's own description is the interface and a second
-one would age separately. There is no command line, because everything an
-operator does either goes through one of the three surfaces or belongs to the
-host the service runs on.
+one would age separately. There is no command line for operations, because
+everything an operator does either goes through one of the three surfaces or
+belongs to the host the service runs on. One helper stands beside the service:
+`simple-a2a first-prompt` prints the first prompt for an agent, reads nothing but
+the administration secret, and changes nothing — `docs/quick-start.md` shows it
+in use.
 
 ## Status
 
@@ -105,6 +118,9 @@ message names the parameter.
   surface on a host name of its own and TLS at the proxy, plus the variant
   without a proxy and what it costs. Its README says what an operator needs:
   the volume, the administration secret, switching a surface off.
+
+To try the image on one machine without any of that, `docs/quick-start.md` has
+the one-liner for each operating system; what it costs is said there.
 
 The package and the image are published only after `tools/smoke.py` has
 started each of them and driven it from outside: a bare start, the token-free
