@@ -208,13 +208,19 @@ def test_an_address_that_is_not_one_is_refused(
     one thing the pair of address and secret cannot survive."""
     _, value = settled
 
-    for given in (["127.0.0.1:18252"], ["http://"], ["http://a:1", "http://b:2"]):
+    for given, said in (
+        (["127.0.0.1:18252"], "not an http or https address"),
+        (["http://"], "names no host"),
+        (["http://a:1", "http://b:2"], "one address at most"),
+    ):
         status = __main__.main([first_prompt.SUBCOMMAND, *given])
         out, err = capsys.readouterr()
         assert status == 2, given
         assert out == ""
         assert value not in err
         assert first_prompt.SUBCOMMAND in err
+        # The refusal names the reason, so that a branch cannot quietly go dead.
+        assert said in err, given
 
 
 def test_without_a_secret_it_says_so_and_exits_non_zero(

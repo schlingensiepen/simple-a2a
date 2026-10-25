@@ -34,8 +34,8 @@ volume and the administration secret holds here as well.
 The image is `ghcr.io/schlingensiepen/simple-a2a:0.1.1`. It serves three
 surfaces on three ports: 8251 (participants), 8252 (administration) and 8253
 (observation). The commands below publish them on the same numbers on your
-machine. If one of
-the three is already taken there, see [If a port is taken](#if-a-port-is-taken).
+machine. If one of the three is already taken there, see
+[If a port is taken](#if-a-port-is-taken).
 
 Each operating system has two variants. **This machine only** publishes the
 ports on the loopback address, `127.0.0.1`: only programs on this machine reach
@@ -82,13 +82,15 @@ wslc run -d --name simple-a2a -p 0.0.0.0:8251:8251 -p 0.0.0.0:8252:8252 -p 0.0.0
 `wslc` has named volumes of two kinds: backed by a Windows path, or backed by
 a virtual disk with a Linux filesystem on it, made with
 `wslc volume create --driver vhd -o SizeBytes=2000000000 simple-a2a-data`
-(the size is the disk's limit, in bytes). The service needs the second kind —
-its holdings rely on a local Linux filesystem, as
-[`../deploy/README.md`](../deploy/README.md), section "The data volume", says.
-Whether `wslc` makes a volume on first mention, and of which kind, its
-documentation does not say; if the line above refuses the volume as unknown,
-or the container stops with its log complaining about the data directory,
-create the volume with the command above first and run the line again.
+(the size is the disk's limit, in bytes). The service needs the second kind:
+it sets owner-only file modes and relies on hard links and atomic renames in
+one directory, which a Windows path shared into the container may not give it
+— [`../deploy/README.md`](../deploy/README.md), section "The data volume", has
+the filesystem requirement. Whether `wslc` makes a volume on first mention, and
+of which kind, its documentation does not say. If the line above refuses the
+volume as unknown, or the container stops with its log complaining about the
+data directory, remove the container and any volume `wslc` made under that
+name, create the volume with the command above, and run the line again.
 
 ## macOS: Apple `container`, or docker and podman
 
