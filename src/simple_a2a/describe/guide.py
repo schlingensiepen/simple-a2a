@@ -45,10 +45,17 @@ ENTRY = "entry"
 PLAIN_HTTP_OPEN = "<!-- plain-http -->"
 PLAIN_HTTP_CLOSE = "<!-- /plain-http -->"
 
-#: The parts of each surface, in reading order. Twelve across the three, plus
+#: The parts of each surface, in reading order. Thirteen across the three, plus
 #: three guide entries — the number the smoke test counts.
 PARTS: dict[str, tuple[str, ...]] = {
-    "messaging": ("concepts", "sending", "receiving", "directories", "files"),
+    "messaging": (
+        "concepts",
+        "sending",
+        "receiving",
+        "staying-reachable",
+        "directories",
+        "files",
+    ),
     "admin": ("first-access", "realms", "tokens", "notes"),
     "observe": ("concepts", "traffic", "contents"),
 }

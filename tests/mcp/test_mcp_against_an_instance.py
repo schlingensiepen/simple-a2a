@@ -1956,7 +1956,10 @@ def test_the_guide_comes_through_its_tool_part_by_part(instance: Instance, progr
     assert unknown["isError"] is True
     said = text_of(unknown)
     assert "recipes" in said
-    assert "concepts, sending, receiving, directories, files" in said
+    named = said.split("It has: ")[1].split(" — ")[0].split(", ")
+    assert sorted(named) == sorted(
+        ["concepts", "sending", "receiving", "staying-reachable", "directories", "files"]
+    )
 
 
 def test_fetching_to_a_path_creates_the_directories_on_the_way(

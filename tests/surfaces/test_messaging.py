@@ -15,6 +15,7 @@ from conftest import bearer
 from fastapi.testclient import TestClient
 
 from simple_a2a.describe import gate
+from simple_a2a.describe.guide import PARTS
 
 # --------------------------------------------------------------------- setting up
 
@@ -212,7 +213,7 @@ def test_the_whole_way_from_an_invitation_to_an_answered_service(
 def test_the_seven_token_free_addresses_answer_without_one(participants: TestClient) -> None:
     for address in ("/", "/guide", "/health", "/build", "/openapi.json", "/skill.zip", "/mcp.zip"):
         assert participants.get(address).status_code == 200, address
-    for part in ("concepts", "sending", "receiving", "directories", "files"):
+    for part in PARTS["messaging"]:
         assert participants.get(f"/guide/{part}").status_code == 200, part
 
 
@@ -279,7 +280,7 @@ def test_the_generated_description_passes_the_gate(participants: TestClient) -> 
 def test_nothing_on_this_surface_names_another(participants: TestClient) -> None:
     """A hard promise: no answer here makes an administration or an observation visible."""
     texts = [participants.get(address).text for address in ("/", "/guide", "/openapi.json")]
-    for part in ("concepts", "sending", "receiving", "directories", "files"):
+    for part in PARTS["messaging"]:
         texts.append(participants.get(f"/guide/{part}").text)
 
     for text in texts:

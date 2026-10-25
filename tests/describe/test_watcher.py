@@ -145,25 +145,54 @@ def instance(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Instance]:
         running.stop()
 
 
+REACHABLE = "staying-reachable"
+
+
 def served() -> tuple[str, str, str]:
     """The entry, the first part of the guide, and SKILL.md, as they are handed out."""
     guide = Guide(surface="messaging", base_address="https://a2a.example.org")
     return guide.entry(), guide.part(GUIDE), package.skill_half(guide, "the participant surface")
 
 
-def test_the_fact_and_the_watcher_stand_near_the_top_of_every_text() -> None:
-    """In the first paragraphs, not after the reader has stopped reading."""
-    for text in served():
-        head = text[: text.find("```")]
-        assert "never contacts you" in head
-        assert "exits as soon as there is new mail" in " ".join(head.split())
-        assert "wakes you when" in " ".join(head.split())
-        assert "15 seconds" in head
-        assert text.find("never contacts you") < 1600
+def reachable() -> str:
+    """The part that carries the watchers, as it is handed out."""
+    return Guide(surface="messaging", base_address="https://a2a.example.org").part(REACHABLE)
+
+
+def plain_watchers() -> dict[str, str]:
+    """The plain watcher, in each language: the first block of each in its part.
+
+    Asserted to be both, so that a test looping over them never loops over nothing.
+    """
+    found = blocks(reachable())
+    assert set(found) == {"sh", "python"}
+    return found
+
+
+def test_the_task_and_where_to_find_the_ways_stand_near_the_top_of_every_text() -> None:
+    """In the first paragraphs, not after the reader has stopped reading.
+
+    The entry and the guide state the task and point to the one part that says how;
+    they carry no watcher of their own, so that there is one and not three that drift.
+    """
     entry, guide, skill = served()
-    assert blocks(guide) == blocks(skill)
-    assert blocks(entry)["sh"] == blocks(guide)["sh"], "one watcher, not two that drift"
-    assert set(blocks(guide)) == {"sh", "python"}
+    for text in (entry, guide):
+        start = text.find("never contacts you")
+        assert 0 <= start < 1600
+        head = " ".join(text[start : start + 1400].split())
+        assert "staying reachable is your task" in head
+        assert "guide/staying-reachable" in head
+        assert "survive a compaction" in head
+        assert "subagent" in head
+        assert "ask your user" in head
+        assert "```" not in text[: text.find("guide/staying-reachable")]
+        assert "sleep 15" not in text and "time.sleep(15)" not in text
+    assert "never contacts you" in skill[:1600]
+    assert skill.count("sleep 15") == reachable().count("sleep 15")
+    assert reachable() in skill
+    said = " ".join(reachable().split())
+    assert "every 15 seconds" in said
+    assert "staying reachable is your task" in said
 
 
 #: The deadline the examples are given where it is under test, in seconds.
@@ -193,7 +222,7 @@ def test_the_examples_end_once_mail_arrives_and_not_before(instance: Instance) -
     """Both examples, on an inbox that has mail already and on an empty one."""
     anna, berta, clara = (instance.member(name) for name in ("Anna", "Berta", "Clara"))
     instance.send(anna, "Berta", "already there")
-    examples = blocks(served()[1])
+    examples = plain_watchers()
     watchers: list[tuple[str, str, subprocess.Popen[bytes]]] = []
     try:
         for who, token in (("Berta", berta), ("Clara", clara)):
@@ -240,7 +269,7 @@ def test_a_wrong_token_ends_the_watcher_at_once_instead_of_waking_later(
     instance: Instance,
 ) -> None:
     """A watcher that cannot ask must say so now, not sleep on a refusal."""
-    for language, code in blocks(served()[1]).items():
+    for language, code in plain_watchers().items():
         if language == "sh" and shutil.which("curl") is None:
             continue
         finished = subprocess.run(
@@ -293,7 +322,7 @@ def test_the_examples_end_at_their_own_deadline_with_a_line_of_their_own(
     dora = instance.member("Dora")
     watchers = [
         (language, watch(code, language, dora, instance.base))
-        for language, code in blocks(served()[1]).items()
+        for language, code in plain_watchers().items()
     ]
     started = time.monotonic()
     try:
@@ -322,7 +351,7 @@ def test_mail_before_the_deadline_still_ends_the_examples_with_the_new_mail_line
     anton, emil = instance.member("Anton"), instance.member("Emil")
     watchers = [
         (language, watch(code, language, emil, instance.base, deadline=PATIENCE))
-        for language, code in blocks(served()[1]).items()
+        for language, code in plain_watchers().items()
     ]
     try:
         time.sleep(INTERVAL * 1.5)
@@ -371,7 +400,7 @@ def test_a_seen_id_that_is_the_newest_keeps_the_examples_waiting_until_their_dea
     seen = newest_id(instance, fritz)
     watchers = [
         (language, watch(code, language, fritz, instance.base, seen=seen))
-        for language, code in blocks(served()[1]).items()
+        for language, code in plain_watchers().items()
     ]
     started = time.monotonic()
     time.sleep(DEADLINE - INTERVAL - 0.5)
@@ -397,7 +426,7 @@ def test_mail_that_arrived_before_the_restart_ends_the_examples_at_once(
     started = time.monotonic()
     watchers = [
         (language, watch(code, language, gerda, instance.base, deadline=PATIENCE, seen=seen))
-        for language, code in blocks(served()[1]).items()
+        for language, code in plain_watchers().items()
     ]
     for language, out, err, code in ended(watchers):
         took = time.monotonic() - started
@@ -417,7 +446,7 @@ def test_an_empty_inbox_keeps_the_examples_waiting_and_the_first_mail_ends_them(
     sender, hanna = instance.member(f"Ida{suffix}"), instance.member(f"Hanna{suffix}")
     watchers = [
         (language, watch(code, language, hanna, instance.base, deadline=PATIENCE, seen=seen))
-        for language, code in blocks(served()[1]).items()
+        for language, code in plain_watchers().items()
     ]
     time.sleep(INTERVAL * 3.5)
     for language, watcher in watchers:
@@ -478,7 +507,7 @@ def test_an_ask_that_hangs_does_not_carry_the_watcher_past_its_deadline(language
         pytest.skip("the shell example needs curl")
     stalling = Stalling()
     try:
-        watcher = watch(blocks(served()[1])[language], language, "t", stalling.base)
+        watcher = watch(plain_watchers()[language], language, "t", stalling.base)
         started = time.monotonic()
         out, err = watcher.communicate(timeout=DEADLINE + ASK_LIMIT + PATIENCE)
         took = time.monotonic() - started
@@ -593,26 +622,25 @@ def test_redeeming_twice_keeps_the_first_answer(instance: Instance, tmp_path: Pa
         assert http("GET", f"{instance.base}/inbox", token=token)["entries"] == []
 
 
-def test_the_entry_and_the_guide_carry_the_same_shell_watcher_byte_for_byte() -> None:
-    """The entry's copy is not run by the watcher tests; this keeps it the guide's."""
-    entry, guide, _ = served()
-    first_sh = [
-        next(code for language, code in FENCE.findall(text) if language == "sh")
-        for text in (entry, guide)
-    ]
-    assert first_sh[0].encode() == first_sh[1].encode()
+def test_the_watcher_is_written_once() -> None:
+    """One part carries it; every other text points there instead of keeping a copy."""
+    plain = plain_watchers()["sh"]
+    guide = Guide(surface="messaging", base_address="https://a2a.example.org")
+    for name, text in {"entry": guide.entry(), **guide.parts()}.items():
+        if name != REACHABLE:
+            assert plain not in text, name
+            assert "A2A_WATCH_MINUTES" not in text, name
+    assert reachable().count(plain) == 1
 
 
 def test_the_texts_say_how_to_hand_the_watcher_its_seen_id() -> None:
     """On the start line, fresh, never exported; from entries[0]; unset when empty."""
-    receiving = Guide(surface="messaging", base_address="https://a2a.example.org").part("receiving")
-    for text in served()[:2]:
-        said = " ".join(text.split())
-        assert "`A2A_SEEN=<message_id> sh watch.sh`" in said
-        assert "`entries[0].message_id`" in said
-        assert "never `export" in said
-        assert "if the inbox was empty, leave it unset" in said
+    receiving = reachable()
     said = " ".join(receiving.split())
+    assert "`A2A_SEEN=<message_id> sh watch.sh`" in said
+    assert "`entries[0].message_id`" in said
+    assert "never `export" in said
+    assert "if the inbox was empty, leave it unset" in said
     # Inline, with the script's default: a fresh shell has no `$handled`, and an
     # empty A2A_SEEN would pass silently for an unset one.
     listed = '"${A2A_HANDLED:-$HOME/.a2a/handled}"'
@@ -623,23 +651,24 @@ def test_the_texts_say_how_to_hand_the_watcher_its_seen_id() -> None:
     assert "handled.txt" not in said, "the prose names the list the script reads"
 
 
-# ------------------------------------------------------------------ the receiving part
+# ------------------------------------------------------------- the further examples
 
 
-def receiving_example(marker: str) -> str:
-    """The one shell example of the receiving part that names `marker`."""
-    text = Guide(surface="messaging", base_address="https://a2a.example.org").part("receiving")
-    found = [code for language, code in FENCE.findall(text) if language == "sh" and marker in code]
-    assert len(found) == 1, f"one example with {marker} in the receiving part"
+def reachable_example(marker: str) -> str:
+    """The one shell example of the staying-reachable part that names `marker`."""
+    found = [
+        code for language, code in FENCE.findall(reachable()) if language == "sh" and marker in code
+    ]
+    assert len(found) == 1, f"one example with {marker} in the staying-reachable part"
     return found[0]
 
 
-def test_the_examples_of_the_receiving_part_do_not_displace_the_watcher() -> None:
-    """The first shell block of every served text is still the plain watcher."""
-    entry, guide, skill = served()
-    assert blocks(skill)["sh"] == blocks(guide)["sh"] == blocks(entry)["sh"]
-    assert "A2A_SHOW_BODY" not in blocks(skill)["sh"]
-    assert "A2A_HANDLED" not in blocks(skill)["sh"]
+def test_the_further_examples_do_not_displace_the_watcher() -> None:
+    """The first shell block of the part is still the plain watcher."""
+    plain = plain_watchers()["sh"]
+    assert "A2A_SHOW_BODY" not in plain
+    assert "A2A_HANDLED" not in plain
+    assert "New mail: read your inbox." in plain
 
 
 @pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
@@ -647,7 +676,7 @@ def test_the_showing_watcher_ends_at_new_mail_and_prints_what_arrived(
     instance: Instance,
 ) -> None:
     """It waits like the plain one, then prints each new envelope back to the one it knew."""
-    code = receiving_example("A2A_SHOW_BODY")
+    code = reachable_example("A2A_SHOW_BODY")
     sender, iris = instance.member("Moritz"), instance.member("Iris")
     instance.send(sender, "Iris", "read already")
     seen = newest_id(instance, iris)
@@ -686,7 +715,7 @@ def test_the_showing_watcher_ends_at_new_mail_and_prints_what_arrived(
 
 @pytest.mark.skipif(shutil.which("curl") is None, reason="the shell example needs curl")
 def test_the_showing_watcher_prints_bodies_only_when_asked(instance: Instance) -> None:
-    code = receiving_example("A2A_SHOW_BODY")
+    code = reachable_example("A2A_SHOW_BODY")
     sender, jan = instance.member("Nils"), instance.member("Jan")
     instance.send(sender, "Jan", "old")
     seen = newest_id(instance, jan)
@@ -719,7 +748,7 @@ def test_the_list_of_handled_ids_names_what_is_left_oldest_first(
     instance: Instance, tmp_path: Path
 ) -> None:
     """Run as written: what is not in the list, oldest first; then nothing, once handled."""
-    code = receiving_example("A2A_HANDLED")
+    code = reachable_example("A2A_HANDLED")
     sender, karla = instance.member("Otto"), instance.member("Karla")
     instance.send(sender, "Karla", "handled")
     handled = newest_id(instance, karla)
@@ -766,7 +795,7 @@ def test_the_list_of_handled_ids_names_what_is_left_oldest_first(
 def test_the_list_of_handled_ids_starts_empty_and_a_wrong_token_fails(
     instance: Instance, tmp_path: Path
 ) -> None:
-    code = receiving_example("A2A_HANDLED")
+    code = reachable_example("A2A_HANDLED")
     sender, lea = instance.member("Paul"), instance.member("Lea")
     instance.send(sender, "Lea", "the only one")
     only = newest_id(instance, lea)
@@ -881,7 +910,7 @@ def handled_left(inbox: FixedInbox, handled: list[str], tmp_path: Path) -> list[
     kept = tmp_path / "handled"
     kept.write_text("".join(f"{i}\n" for i in handled))
     finished = subprocess.run(
-        ["sh", "-c", receiving_example("A2A_HANDLED")],
+        ["sh", "-c", reachable_example("A2A_HANDLED")],
         env={
             "PATH": os.environ.get("PATH", ""),
             "A2A_BASE": inbox.base,
@@ -935,7 +964,7 @@ def test_the_list_of_handled_ids_says_when_more_than_its_window_may_be_new(
 def showing(inbox: FixedInbox, seen: str, show_body: bool = False) -> list[str]:
     """What the showing watcher prints when `seen` is not the newest any more."""
     finished = subprocess.run(
-        runnable(receiving_example("A2A_SHOW_BODY"), "sh", deadline_in_seconds=True),
+        runnable(reachable_example("A2A_SHOW_BODY"), "sh", deadline_in_seconds=True),
         env={
             "PATH": os.environ.get("PATH", ""),
             "A2A_BASE": inbox.base,
@@ -1002,7 +1031,7 @@ def test_the_showing_watcher_drops_control_characters_from_bodies(tmp_path: Path
     body = f"first\r--- {forged}\x1b[2Ksecond\x0b--- {forged}\x0c\x1e\x7fthird\ttab\n"
     with FixedInbox([new, old], {new: body}) as inbox:
         finished = subprocess.run(
-            runnable(receiving_example("A2A_SHOW_BODY"), "sh", deadline_in_seconds=True),
+            runnable(reachable_example("A2A_SHOW_BODY"), "sh", deadline_in_seconds=True),
             env={
                 "PATH": os.environ.get("PATH", ""),
                 "A2A_BASE": inbox.base,

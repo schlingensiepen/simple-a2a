@@ -1,7 +1,7 @@
 """The texts as they are served: every part there, one address, and no leftovers.
 
 These run against the real texts rather than fixtures, because the promises being
-checked are about the shipped files: twelve parts across three surfaces, the base
+checked are about the shipped files: thirteen parts across three surfaces, the base
 address in exactly one of them, and an archive whose big half is the same bytes
 wherever it is served from.
 """
@@ -26,10 +26,10 @@ def guide_of(surface: str, base: str = BASE) -> Guide:
     return Guide(surface=surface, base_address=base)
 
 
-def test_there_are_twelve_parts_across_the_three_surfaces() -> None:
-    """Five, four and three — the number the smoke test counts."""
-    assert [len(PARTS[surface]) for surface in SURFACES] == [5, 4, 3]
-    assert sum(len(PARTS[surface]) for surface in SURFACES) == 12
+def test_there_are_thirteen_parts_across_the_three_surfaces() -> None:
+    """Six, four and three — the number the smoke test counts."""
+    assert [len(PARTS[surface]) for surface in SURFACES] == [6, 4, 3]
+    assert sum(len(PARTS[surface]) for surface in SURFACES) == 13
 
 
 @pytest.mark.parametrize("surface", SURFACES)
