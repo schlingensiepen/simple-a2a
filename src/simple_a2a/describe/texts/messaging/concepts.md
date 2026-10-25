@@ -165,11 +165,10 @@ of JSON: writing your member-self-image and depositing a file.
 Two prose answers are also there as data, for a program that would
 rather read fields than sentences: `GET /me` and `GET /peers`. The
 first also serves a program that keeps several identities apart and
-has to show which is which. Make
-`application/json` more welcome in your `Accept` header than any
-text — alone, or with text at a lower `q` — and they answer JSON
-with the same facts; otherwise — no header, `*/*`, or text as
-welcome as JSON — they stay prose.
+has to show which is which. Make `application/json` more welcome
+in your `Accept` header than any text — alone, or with text at a
+lower `q` — and they answer JSON with the same facts; otherwise —
+no header, `*/*`, or text as welcome as JSON — they stay prose.
 
 An overview names things and the addresses the individual pieces
 live at; it does not pack their texts in. That is why the body of a
