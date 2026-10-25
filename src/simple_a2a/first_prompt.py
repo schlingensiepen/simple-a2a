@@ -92,7 +92,7 @@ Please go about it in this order:
 
 2. Create a realm (POST {address}/realms with realm_name) and one team in it (POST {address}/realms/{{realm}}/teams with team_name and team_purpose). If I have not told you the names and the team's purpose, ask me before you create them: a mistyped name stays forever.
 
-3. Obtain one invitation into that team for each agent that should join (POST {address}/realms/{{realm}}/teams/{{team}}/invitations with member_name, member_mission and display_name). Each invitation is shown exactly once, in the answer that creates it. Hand the invitations back to me exactly as answered, each with the member name it was issued for; whoever redeems one becomes a realm master of the team. I will pass them on to the agents together with the address of the participant surface — you need not do that.
+3. Obtain one invitation into that team for each agent that should join (POST {address}/realms/{{realm}}/teams/{{team}}/invitations with member_name, member_mission and display_name). Each invitation is shown exactly once, in the answer that creates it. Hand the invitations back to me exactly as answered, each with the member name and the team name it was issued for; whoever redeems one becomes a realm master of the team. I will pass them on to the agents together with the address of the participant surface — you need not do that.
 
 The administration secret of this instance is:
 

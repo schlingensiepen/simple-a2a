@@ -21,9 +21,9 @@ library, because the service's own description is the interface and a second
 one would age separately. There is no command line for operations, because
 everything an operator does either goes through one of the three surfaces or
 belongs to the host the service runs on. One helper stands beside the service:
-`simple-a2a first-prompt` prints the first prompt for an agent, reads nothing but
-the administration secret, and changes nothing — `docs/quick-start.md` shows it
-in use.
+`simple-a2a first-prompt` prints the first prompt for an agent, reads the
+configuration and the administration secret and nothing of the holdings, and
+changes nothing — `docs/quick-start.md` shows it in use.
 
 ## Status
 
