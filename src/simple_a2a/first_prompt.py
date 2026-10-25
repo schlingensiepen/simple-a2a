@@ -57,10 +57,11 @@ def address_from(arguments: list[str]) -> str:
         return DEFAULT_ADDRESS
     if len(arguments) > 1:
         raise ValueError(f"one address at most, got {len(arguments)}")
-    given = arguments[0].strip().rstrip("/")
+    given = arguments[0].strip()
     if not given.startswith(("http://", "https://")):
         raise ValueError(f"{arguments[0]!r} is not an http or https address")
-    if given in ("http:/", "https:/"):
+    given = given.rstrip("/")
+    if given in ("http:", "https:"):
         raise ValueError(f"{arguments[0]!r} names no host")
     return given
 
@@ -119,19 +120,32 @@ def main(arguments: list[str]) -> int:
         return 2
 
     if found is None:
+        file = Layout(root=resolved.data_dir).admin_secret
         if not resolved.administration_is_on:
             print(
                 f"simple-a2a {SUBCOMMAND}: the administration surface is switched off "
                 f"({config.ADMIN_PORT} is empty), so this instance has no administration "
-                "secret and no first prompt. Leave the variable set and start again.",
+                f"secret and no first prompt. Give {config.ADMIN_PORT} a port, or unset it "
+                "for the default, and start the service again.",
+                file=sys.stderr,
+            )
+        elif resolved.regenerate_admin_secret:
+            # `new` asks the service for a secret; it is not one. The file it would
+            # have written is missing, so the service has not started with it yet.
+            print(
+                f"simple-a2a {SUBCOMMAND}: no administration secret yet — {config.ADMIN_SECRET} "
+                f"is set to {config.REGENERATE!r}, which asks the service for a new one and is "
+                f"not one itself, and there is no file {file}. The service writes that file "
+                "when it starts with this value; run this beside the running service, in its "
+                "environment, with its data directory.",
                 file=sys.stderr,
             )
         else:
             print(
                 f"simple-a2a {SUBCOMMAND}: no administration secret yet — {config.ADMIN_SECRET} "
-                f"is not set and there is no file {Layout(root=resolved.data_dir).admin_secret}. "
-                "The service writes that file at its first start; run this beside a running "
-                "service, in its environment, with its data directory.",
+                f"is not set and there is no file {file}. The service writes that file at its "
+                "first start; run this beside a running service, in its environment, with its "
+                "data directory.",
                 file=sys.stderr,
             )
         return 1

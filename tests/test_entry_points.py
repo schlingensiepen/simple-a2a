@@ -9,6 +9,7 @@ settled — and writes nothing.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -286,12 +287,33 @@ def test_the_environment_wins_in_the_helper_as_at_the_start(
 def test_a_bare_start_is_still_a_bare_start(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Without arguments nothing has changed: the configuration is read and an unusable
-    value stops the start, before anything is served. (The image's entry point.)"""
+    """The console script calls `main()` with nothing, and reads the process's own
+    arguments: a bare `simple-a2a` — the image's entry point — has to reach the
+    configuration and stop on an unusable value, not be refused as "arguments". An
+    off-by-one on `sys.argv` would make every container start exit 2, and a suite
+    that only ever passed lists would stay green."""
+    monkeypatch.setattr(sys, "argv", ["simple-a2a"])
     monkeypatch.setenv(config.PORT, "not-a-port")
 
-    assert __main__.main([]) == 2
-    assert config.PORT in capsys.readouterr().err
+    assert __main__.main() == 2
+    err = capsys.readouterr().err
+    assert config.PORT in err
+    assert "takes no arguments" not in err
+
+
+def test_the_console_script_dispatches_the_helper_from_the_process_arguments(
+    settled: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`podman exec simple-a2a simple-a2a first-prompt ADDRESS` arrives as `sys.argv`."""
+    _, value = settled
+    monkeypatch.setattr(
+        sys, "argv", ["simple-a2a", first_prompt.SUBCOMMAND, "http://127.0.0.1:18252"]
+    )
+
+    assert __main__.main() == 0
+    out = capsys.readouterr().out
+    assert value in out
+    assert "http://127.0.0.1:18252/" in out
 
 
 def test_anything_else_on_the_command_line_is_refused_rather_than_served(
